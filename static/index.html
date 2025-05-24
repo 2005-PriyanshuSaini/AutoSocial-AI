@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Social AI Frontend</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#64748b',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-button.active { 
+            background-color: #3b82f6; 
+            color: white; 
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+        .card-shadow {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .result-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+        .btn-secondary {
+            background: #64748b;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            margin: 0.25rem;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover {
+            background: #475569;
+        }
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #059669;
+        }
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        .btn-outline {
+            background: transparent;
+            color: #3b82f6;
+            border: 1px solid #3b82f6;
+        }
+        .btn-outline:hover {
+            background: #3b82f6;
+            color: white;
+        }
+        .input-field {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .badge-success {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .badge-secondary {
+            background: #f1f5f9;
+            color: #475569;
+        }
+        .badge-custom {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .post-card {
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #3b82f6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin: 1rem 0;
+            background: white;
+        }
+        .custom-post-card {
+            border-left-color: #f59e0b;
+        }
+        .icon {
+            width: 1.25rem;
+            height: 1.25rem;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        .scroll-area {
+            max-height: 24rem;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+        .section-divider {
+            border-top: 2px solid #e2e8f0;
+            margin: 2rem 0;
+            padding-top: 2rem;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div class="max-w-7xl mx-auto p-4">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-slate-900 mb-2 flex items-center justify-center gap-3">
+                <svg class="icon w-10 h-10 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                Auto-Social AI
+            </h1>
+            <p class="text-slate-600 text-lg">Intelligent social media content management platform</p>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="bg-white rounded-lg card-shadow mb-6 p-1">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1">
+                <button class="tab-button active px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('generate')">
+                    🤖 Generate
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('review')">
+                    👁️ Review
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('post')">
+                    📤 Post
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('trending')">
+                    📈 Trending
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('watch')">
+                    📁 Watch
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('manage')">
+                    📋 Manage
+                </button>
+            </div>
+        </div>
+
+        <!-- Generate Content Tab -->
+        <div id="generate" class="tab-content active">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        🤖 Generate Content
+                    </h2>
+                    <p class="text-slate-600">Create AI-powered social media content from your prompts</p>
+                </div>
+                <div class="space-y-4">
+                    <input id="gen-prompt" class="input-field" placeholder="Enter your content prompt..." />
+                    <button class="btn-primary" onclick="generateContent()">Generate Content</button>
+                    <div id="gen-result" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Result:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Review Content Tab -->
+        <div id="review" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        👁️ Review Content
+                    </h2>
+                    <p class="text-slate-600">Approve or reject generated content before publishing</p>
+                </div>
+                <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input id="review-id" class="input-field" type="number" placeholder="Post ID" />
+                        <select id="review-status" class="input-field">
+                            <option value="approved">✅ Approved</option>
+                            <option value="rejected">❌ Rejected</option>
+                        </select>
+                    </div>
+                    <button class="btn-primary" onclick="reviewContent()">Submit Review</button>
+                    <div id="review-result" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Result:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Post Content Tab -->
+        <div id="post" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        📤 Post Content
+                    </h2>
+                    <p class="text-slate-600">Publish your content to social media platforms</p>
+                </div>
+                <div class="space-y-4">
+                    <select id="post-platform" class="input-field">
+                        <option value="twitter">🐦 Twitter</option>
+                        <option value="linkedin">💼 LinkedIn</option>
+                    </select>
+                    <textarea id="post-content" class="input-field" placeholder="Enter your content..." rows="4"></textarea>
+                    <button class="btn-primary" onclick="postContent()">
+                        <span id="platform-text">Post to Twitter</span>
+                    </button>
+                    <div id="post-result" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Result:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trending Topics Tab -->
+        <div id="trending" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        📈 Trending Topics
+                    </h2>
+                    <p class="text-slate-600">Discover what's trending to inspire your content</p>
+                </div>
+                <div class="space-y-4">
+                    <button class="btn-primary" onclick="getTrending()">Get Trending Topics</button>
+                    <div id="trending-result" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Trending Topics:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Watch Path Tab -->
+        <div id="watch" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        📁 Set Watch Path
+                    </h2>
+                    <p class="text-slate-600">Monitor files or directories for automatic content generation</p>
+                </div>
+                <div class="space-y-4">
+                    <input id="watch-path" class="input-field" placeholder="Enter full path to file or folder..." />
+                    <button class="btn-primary" onclick="setWatchPath()">Set Watch Path</button>
+                    <div id="watch-path-result" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Result:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Content Tab -->
+        <div id="manage" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        📋 Content Management
+                    </h2>
+                    <p class="text-slate-600">Review, manage, and submit content for approval and publishing</p>
+                </div>
+                
+                <!-- Custom Content Submission Section -->
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                        ✏️ Submit Custom Content
+                    </h3>
+                    <div class="space-y-4">
+                        <textarea id="custom-content" class="input-field" placeholder="Write your own content here..." rows="4"></textarea>
+                        <button class="btn-primary" onclick="submitCustomContent()">Submit for Approval</button>
+                        <div id="custom-content-result" class="result-box" style="display: none;">
+                            <h4 class="font-medium mb-2">Result:</h4>
+                            <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generated Content List Section -->
+                <div class="section-divider">
+                    <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                        📝 Generated Content for Approval
+                    </h3>
+                    <div class="space-y-4">
+                        <button class="btn-primary" onclick="loadGeneratedPosts()">Refresh Content List</button>
+                        <div id="generated-list" class="scroll-area">
+                            <p class="text-slate-500 text-center py-8">No generated content yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => tab.classList.remove('active'));
+            
+            // Remove active class from all tab buttons
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => button.classList.remove('active'));
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+        }
+
+        // Update platform text when selection changes
+        document.getElementById('post-platform').addEventListener('change', function() {
+            const platform = this.value;
+            const platformText = platform === 'twitter' ? 'Post to Twitter' : 'Post to LinkedIn';
+            document.getElementById('platform-text').textContent = platformText;
+        });
+
+        // Helper function to show result
+        function showResult(elementId, content) {
+            const resultDiv = document.getElementById(elementId);
+            const pre = resultDiv.querySelector('pre');
+            pre.textContent = content;
+            resultDiv.style.display = 'block';
+        }
+
+        // API Functions
+        async function generateContent() {
+            const prompt = document.getElementById('gen-prompt').value;
+            try {
+                const res = await fetch('/generate-content/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({prompt})
+                });
+                const data = await res.json();
+                showResult('gen-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('gen-result', 'Error generating content');
+            }
+        }
+
+        async function reviewContent() {
+            const id = parseInt(document.getElementById('review-id').value);
+            const status = document.getElementById('review-status').value;
+            try {
+                const res = await fetch('/review-content/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({post_id: id, status})
+                });
+                const data = await res.json();
+                showResult('review-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('review-result', 'Error reviewing content');
+            }
+        }
+
+        async function postContent() {
+            const platform = document.getElementById('post-platform').value;
+            const content = document.getElementById('post-content').value;
+            try {
+                const res = await fetch('/post-content/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({platform, content})
+                });
+                const data = await res.json();
+                showResult('post-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('post-result', 'Error posting content');
+            }
+        }
+
+        async function getTrending() {
+            try {
+                const res = await fetch('/trending-topics/');
+                const data = await res.json();
+                showResult('trending-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('trending-result', 'Error fetching trending topics');
+            }
+        }
+
+        async function setWatchPath() {
+            const path = document.getElementById('watch-path').value;
+            try {
+                const res = await fetch('/set-watch-path/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path})
+                });
+                const data = await res.json();
+                showResult('watch-path-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('watch-path-result', 'Error setting watch path');
+            }
+        }
+
+        async function submitCustomContent() {
+            const content = document.getElementById('custom-content').value;
+            try {
+                const res = await fetch('/submit-custom-content/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({content})
+                });
+                const data = await res.json();
+                showResult('custom-content-result', JSON.stringify(data, null, 2));
+                // Clear the textarea after successful submission
+                document.getElementById('custom-content').value = '';
+                // Refresh the generated posts list to show the new custom content
+                setTimeout(loadGeneratedPosts, 500);
+            } catch (error) {
+                showResult('custom-content-result', 'Error submitting custom content');
+            }
+        }
+
+        async function loadGeneratedPosts() {
+            try {
+                const res = await fetch('/generated-posts/');
+                const posts = await res.json();
+                let html = '';
+                
+                if (posts.length === 0) {
+                    html = '<p class="text-slate-500 text-center py-8">No generated content yet.</p>';
+                } else {
+                    for (const post of posts) {
+                        const statusBadge = getStatusBadge(post.status, post.type);
+                        const cardClass = post.type === 'custom' ? 'post-card custom-post-card' : 'post-card';
+                        const typeLabel = post.type === 'custom' ? '✏️ Custom Content' : '🤖 AI Generated';
+                        
+                        html += `
+                            <div class="${cardClass}">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-sm font-medium text-slate-600">${typeLabel}</span>
+                                        </div>
+                                        <p class="font-medium">ID: ${post.id}</p>
+                                        <p class="text-sm text-slate-600">File: ${post.file}</p>
+                                    </div>
+                                    ${statusBadge}
+                                </div>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3">
+                                    <pre class="whitespace-pre-wrap">${JSON.stringify(post.content, null, 2)}</pre>
+                                </div>
+                                <div class="flex gap-2 flex-wrap">
+                                    <button class="btn-secondary btn-success" onclick="approvePost(${post.id})">
+                                        ✅ Approve
+                                    </button>
+                                    <button class="btn-secondary btn-danger" onclick="rejectPost(${post.id})">
+                                        ❌ Reject
+                                    </button>
+                                    <button class="btn-secondary btn-outline" onclick="publishPost(${post.id})">
+                                        📤 Publish
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                document.getElementById('generated-list').innerHTML = html;
+            } catch (error) {
+                document.getElementById('generated-list').innerHTML = '<p class="text-red-500 text-center py-8">Error loading content</p>';
+            }
+        }
+
+        function getStatusBadge(status, type) {
+            let badgeClass = '';
+            let icon = '';
+            
+            switch (status) {
+                case 'approved':
+                    badgeClass = 'badge badge-success';
+                    icon = '✅';
+                    break;
+                case 'rejected':
+                    badgeClass = 'badge badge-danger';
+                    icon = '❌';
+                    break;
+                default:
+                    badgeClass = type === 'custom' ? 'badge badge-custom' : 'badge badge-secondary';
+                    icon = '⏳';
+                    break;
+            }
+            
+            return `<span class="${badgeClass}">${icon} ${status}</span>`;
+        }
+
+        async function approvePost(id) {
+            await fetch('/review-content/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({post_id: id, status: "approved"})
+            });
+            loadGeneratedPosts();
+        }
+
+        async function rejectPost(id) {
+            await fetch('/review-content/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({post_id: id, status: "rejected"})
+            });
+            loadGeneratedPosts();
+        }
+
+        async function publishPost(id) {
+            const platform = prompt("Enter platform (twitter/linkedin):", "twitter");
+            if (!platform) return;
+            const res = await fetch('/post-content/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({post_id: id, platform, content: ""})
+            });
+            const data = await res.json();
+            alert(data.message || "Error");
+            loadGeneratedPosts();
+        }
+    </script>
+</body>
+</html>
