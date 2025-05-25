@@ -114,7 +114,7 @@ DATABASE_URL=
 
 ## 🚧 Project Status
 
-- Backend (FastAPI): ✅  
+- Backend (FastAPI): In progress 
 - Frontend: In progress  
 
 ---
