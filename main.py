@@ -1,20 +1,21 @@
+import os
+import time
+import random
+import requests
+import threading
+from pathlib import Path
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from typing import Dict, List, Any
-import random
 from ai import query_all_models
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-import threading
-import os
-import time
-import requests
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from db import SessionLocal, Base, engine
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker
-from pathlib import Path
+from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
 
 app = FastAPI()
 
@@ -95,31 +96,6 @@ def review_content(request: ReviewRequest):
     db.close()
     return {"message": f"Post {request.post_id} marked as {request.status}.", "status": request.status}
 
-def fetch_x_trending_topics():
-    # Placeholder: Replace with actual X (Twitter) API call
-    # Requires Bearer Token and Twitter API v2
-    # Example endpoint: https://api.twitter.com/1.1/trends/place.json?id=1
-    BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
-    if not BEARER_TOKEN:
-        return ["Set X_BEARER_TOKEN in .env"]
-    url = "https://api.twitter.com/1.1/trends/place.json?id=1"  # 1 = Worldwide
-    headers = {"Authorization": f"Bearer {BEARER_TOKEN}"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        if data and isinstance(data, list) and "trends" in data[0]:
-            return [trend["name"] for trend in data[0]["trends"][:10]]
-        return ["No trending topics found"]
-    except Exception as e:
-        return [f"Error fetching X trends: {e}"]
-
-def fetch_linkedin_trending_topics():
-    # LinkedIn does not provide a public trending topics API.
-    # Placeholder: You may need to use a third-party service or scrape (not recommended).
-    # For now, return a static message.
-    return ["LinkedIn trending topics API not available"]
-
 @app.get("/trending-topics/")
 def get_trending_topics() -> Dict[str, List[str]]:
     x_topics = fetch_x_trending_topics()
@@ -144,7 +120,14 @@ def post_content(request: PostRequest):
     db.commit()
     db.refresh(post)
     db.close()
-    return {"message": f"Post published to {request.platform}: {post.content}"}
+    # Actually post to the selected platform
+    if request.platform == "twitter":
+        result = post_to_x(post.content)
+    elif request.platform == "linkedin":
+        result = post_to_linkedin(post.content)
+    else:
+        result = {"error": "Unsupported platform"}
+    return {"message": f"Post published to {request.platform}: {post.content}", "result": result}
 
 @app.post("/submit-custom-content/")
 def submit_custom_content(request: CustomContentRequest):
