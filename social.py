@@ -1,5 +1,6 @@
 import os
 import requests
+from requests_oauthlib import OAuth1
 
 # --- X (Twitter) Integration ---
 
@@ -25,24 +26,23 @@ def fetch_x_trending_topics():
 
 def post_to_x(content):
     """
-    Post content to X (Twitter) using Twitter API v2.
-    Requires Bearer Token with write permissions.
+    Post content to X (Twitter) using OAuth 1.0a (user context).
     """
-    BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
-    if not BEARER_TOKEN:
-        return {"error": "Set X_BEARER_TOKEN in .env"}
+    CONSUMER_KEY = os.getenv("X_CONSUMER_KEY")
+    CONSUMER_SECRET = os.getenv("X_CONSUMER_SECRET")
+    ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
+    ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET")
+    if not all([CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET]):
+        return {"error": "Set all X OAuth 1.0a credentials in .env"}
     url = "https://api.twitter.com/2/tweets"
-    headers = {
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    auth = OAuth1(CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
     data = {"text": content}
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=10)
+        resp = requests.post(url, auth=auth, json=data, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"error": f"Error posting to X: {e}"}
+        return {"error": f"Error posting to X (OAuth 1.0a): {e}"}
 
 # --- LinkedIn Integration ---
 

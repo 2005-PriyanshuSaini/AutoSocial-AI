@@ -255,7 +255,7 @@
                         <option value="twitter">🐦 Twitter</option>
                         <option value="linkedin">💼 LinkedIn</option>
                     </select>
-                    <textarea id="post-content" class="input-field" placeholder="Enter your content..." rows="4"></textarea>
+                    <input id="post-id" class="input-field" type="number" placeholder="Enter Post ID to publish" />
                     <button class="btn-primary" onclick="postContent()">
                         <span id="platform-text">Post to Twitter</span>
                     </button>
@@ -291,15 +291,21 @@
             <div class="bg-white rounded-lg card-shadow p-6">
                 <div class="mb-4">
                     <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
-                        📁 Set Watch Path
+                        📁 Watch Folder Session
                     </h2>
-                    <p class="text-slate-600">Monitor files or directories for automatic content generation</p>
+                    <p class="text-slate-600">Monitor a folder for changes for a set time and generate grouped content</p>
                 </div>
                 <div class="space-y-4">
-                    <input id="watch-path" class="input-field" placeholder="Enter full path to file or folder..." />
-                    <button class="btn-primary" onclick="setWatchPath()">Set Watch Path</button>
-                    <div id="watch-path-result" class="result-box" style="display: none;">
-                        <h4 class="font-medium mb-2">Result:</h4>
+                    <input id="watch-folder-path" class="input-field" placeholder="Enter full path to folder..." />
+                    <input id="watch-duration" class="input-field" type="number" min="1" placeholder="Duration (minutes)" />
+                    <button class="btn-primary" onclick="startWatchSession()">Start Watch Session</button>
+                    <button class="btn-secondary btn-danger" onclick="stopWatchSession()">Stop Session</button>
+                    <div id="watch-session-status" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Session Status:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    </div>
+                    <div id="watch-session-results" class="result-box" style="display: none;">
+                        <h4 class="font-medium mb-2">Session Results (Grouped by File):</h4>
                         <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
                     </div>
                 </div>
@@ -383,6 +389,10 @@
         // API Functions
         async function generateContent() {
             const prompt = document.getElementById('gen-prompt').value;
+            // Ask for user confirmation before generating content
+            if (!confirm("Do you want to generate content for this prompt?")) {
+                return;
+            }
             try {
                 const res = await fetch('/generate-content/', {
                     method: 'POST',
@@ -390,7 +400,28 @@
                     body: JSON.stringify({prompt})
                 });
                 const data = await res.json();
-                showResult('gen-result', JSON.stringify(data, null, 2));
+                // Show only the main message if present, else fallback to JSON
+                let display = "";
+                if (data && data.responses && data.responses.ChatGPT) {
+                    try {
+                        // Try to parse if it's a JSON string
+                        const parsed = JSON.parse(data.responses.ChatGPT);
+                        if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
+                            display = parsed.choices[0].message.content;
+                        } else if (parsed.message && typeof parsed.message === "string") {
+                            display = parsed.message;
+                        } else {
+                            display = data.responses.ChatGPT;
+                        }
+                    } catch {
+                        display = data.responses.ChatGPT;
+                    }
+                } else if (data && data.responses && typeof data.responses === "string") {
+                    display = data.responses;
+                } else {
+                    display = JSON.stringify(data, null, 2);
+                }
+                showResult('gen-result', display);
             } catch (error) {
                 showResult('gen-result', 'Error generating content');
             }
@@ -414,12 +445,16 @@
 
         async function postContent() {
             const platform = document.getElementById('post-platform').value;
-            const content = document.getElementById('post-content').value;
+            const post_id = parseInt(document.getElementById('post-id').value);
+            if (!post_id) {
+                showResult('post-result', 'Please enter a valid Post ID.');
+                return;
+            }
             try {
                 const res = await fetch('/post-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({platform, content})
+                    body: JSON.stringify({post_id, platform, content: ""})
                 });
                 const data = await res.json();
                 showResult('post-result', JSON.stringify(data, null, 2));
@@ -438,18 +473,72 @@
             }
         }
 
-        async function setWatchPath() {
-            const path = document.getElementById('watch-path').value;
+        // --- Watch Session Logic ---
+        let watchSessionInterval = null;
+
+        async function startWatchSession() {
+            const path = document.getElementById('watch-folder-path').value;
+            const duration = document.getElementById('watch-duration').value;
+            if (!path || !duration) {
+                showResult('watch-session-status', 'Please provide both folder path and duration.');
+                document.getElementById('watch-session-status').style.display = 'block';
+                return;
+            }
             try {
-                const res = await fetch('/set-watch-path/', {
+                const res = await fetch('/start-watch-session/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path})
+                    body: JSON.stringify({path, duration})
                 });
                 const data = await res.json();
-                showResult('watch-path-result', JSON.stringify(data, null, 2));
+                showResult('watch-session-status', JSON.stringify(data, null, 2));
+                document.getElementById('watch-session-status').style.display = 'block';
+                document.getElementById('watch-session-results').style.display = 'none';
+                // Poll session status every 5 seconds
+                if (watchSessionInterval) clearInterval(watchSessionInterval);
+                watchSessionInterval = setInterval(fetchWatchSessionStatus, 5000);
             } catch (error) {
-                showResult('watch-path-result', 'Error setting watch path');
+                showResult('watch-session-status', 'Error starting watch session');
+                document.getElementById('watch-session-status').style.display = 'block';
+            }
+        }
+
+        async function stopWatchSession() {
+            try {
+                await fetch('/stop-watch-session/', {method: 'POST'});
+                showResult('watch-session-status', 'Session stopping...');
+                document.getElementById('watch-session-status').style.display = 'block';
+                if (watchSessionInterval) clearInterval(watchSessionInterval);
+                setTimeout(fetchWatchSessionStatus, 2000);
+            } catch (error) {
+                showResult('watch-session-status', 'Error stopping session');
+            }
+        }
+
+        async function fetchWatchSessionStatus() {
+            try {
+                const res = await fetch('/watch-session-status/');
+                const data = await res.json();
+                showResult('watch-session-status', JSON.stringify(data, null, 2));
+                document.getElementById('watch-session-status').style.display = 'block';
+                if (!data.active) {
+                    if (watchSessionInterval) clearInterval(watchSessionInterval);
+                    fetchWatchSessionResults();
+                }
+            } catch (error) {
+                showResult('watch-session-status', 'Error fetching session status');
+            }
+        }
+
+        async function fetchWatchSessionResults() {
+            try {
+                const res = await fetch('/watch-session-results/');
+                const data = await res.json();
+                showResult('watch-session-results', JSON.stringify(data, null, 2));
+                document.getElementById('watch-session-results').style.display = 'block';
+            } catch (error) {
+                showResult('watch-session-results', 'Error fetching session results');
+                document.getElementById('watch-session-results').style.display = 'block';
             }
         }
 
@@ -499,7 +588,7 @@
                                     ${statusBadge}
                                 </div>
                                 <div class="bg-slate-50 p-3 rounded text-sm mb-3">
-                                    <pre class="whitespace-pre-wrap">${JSON.stringify(post.content, null, 2)}</pre>
+                                    <pre class="whitespace-pre-wrap">${post.content}</pre>
                                 </div>
                                 <div class="flex gap-2 flex-wrap">
                                     <button class="btn-secondary btn-success" onclick="approvePost(${post.id})">
