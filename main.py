@@ -4,10 +4,11 @@ import random
 import requests
 import threading
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, List, Any
-from ai import query_all_models
+from ai import askall_models as query_all_models
+from ai import ask_hf_api
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from watchdog.observers import Observer
@@ -16,6 +17,19 @@ from db import SessionLocal, Base, engine
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker
 from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
+from datetime import datetime, timedelta
+from prompt_templates import DEFAULT_PROMPT
+
+# Store session state for watch session (move this to the top)
+watch_session = {
+    "active": False,
+    "changed_files": set(),
+    "thread": None,
+    "stop_event": None,
+    "path": None,
+    "end_time": None,
+    "results": None
+}
 
 app = FastAPI()
 
@@ -24,13 +38,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def read_index():
-    return FileResponse("static/index.html")
+    # Serve index.html using absolute path to avoid working directory issues
+    index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    return FileResponse(index_path)
 
 class ReviewRequest(BaseModel):
     post_id: int
     status: str  # "approved" or "rejected"
 
 class PostRequest(BaseModel):
+    post_id: int
     platform: str  # "twitter" or "linkedin"
     content: str
 
@@ -63,8 +80,9 @@ def generate_content(request: GenerateRequest) -> Dict[str, Any]:
     if generation_cancel_event.is_set():
         return {"error": "Generation cancelled."}
     generation_count += 1
-    responses = query_all_models(request.prompt)
-    return {"prompt": request.prompt, "responses": responses}
+    prompt = request.prompt or DEFAULT_PROMPT
+    responses = query_all_models(prompt)
+    return {"prompt": prompt, "responses": responses}
 
 @app.get("/generation-stats/")
 def generation_stats():
@@ -232,40 +250,125 @@ def start_watcher(path, stop_event):
         print("Watcher stopping...")
         # Do not call observer.join() here, let the thread exit
 
-@app.post("/set-watch-path/")
-async def set_watch_path(request: Request):
-    global WATCHED_PATH, watcher_thread, watcher_observer, watcher_stop_event
+@app.post("/start-watch-session/")
+async def start_watch_session(request: Request, background_tasks: BackgroundTasks):
+    global watch_session
+    """
+    Start a watch session for a given folder and duration (in minutes).
+    """
     data = await request.json()
     path = data.get("path")
+    duration = data.get("duration")  # in minutes
     if not path or not os.path.exists(path):
         return JSONResponse({"error": "Invalid path"}, status_code=400)
-    WATCHED_PATH = path
-    # Stop previous watcher
-    if watcher_thread and watcher_thread.is_alive():
-        watcher_stop_event.set()
-        # Do not join here, just set the event and start a new thread
-    watcher_stop_event = threading.Event()
-    def run_watcher():
-        start_watcher(WATCHED_PATH, watcher_stop_event)
-    watcher_thread = threading.Thread(target=run_watcher, daemon=True)
-    watcher_thread.start()
-    return {"message": f"Now watching: {WATCHED_PATH}"}
+    try:
+        duration = int(duration)
+        if duration <= 0:
+            raise ValueError()
+    except Exception:
+        return JSONResponse({"error": "Invalid duration"}, status_code=400)
+    if watch_session["active"]:
+        return JSONResponse({"error": "A session is already active."}, status_code=400)
+    stop_event = threading.Event()
+    watch_session.update({
+        "active": True,
+        "changed_files": set(),
+        "thread": None,
+        "stop_event": stop_event,
+        "path": path,
+        "end_time": datetime.now() + timedelta(minutes=duration),
+        "results": None
+    })
+    def session_watcher():
+        class SessionHandler(FileSystemEventHandler):
+            def on_any_event(self, event):
+                if event.is_directory:
+                    return
+                rel_path = os.path.relpath(event.src_path, path)
+                watch_session["changed_files"].add(os.path.abspath(event.src_path))
+        observer = Observer()
+        handler = SessionHandler()
+        observer.schedule(handler, path, recursive=True)
+        observer.start()
+        try:
+            while not stop_event.is_set():
+                if datetime.now() >= watch_session["end_time"]:
+                    break
+                time.sleep(1)
+        finally:
+            observer.stop()
+            observer.join()
+            # After session ends, generate content for all changed files
+            changed_files = list(watch_session["changed_files"])
+            results = {}
+            for file_path in changed_files:
+                prompt = f"Session change detected in {file_path}"
+                try:
+                    gen_resp = requests.post("http://127.0.0.1:8000/generate-content/", json={"prompt": prompt})
+                    responses = gen_resp.json().get("responses", {})
+                    results[file_path] = responses
+                    # Save each model's content as a separate DB row
+                    db = SessionLocal()
+                    for model_name, content in responses.items():
+                        db_post = GeneratedPost(
+                            file=f"{file_path} [{model_name}]",
+                            content=str(content),
+                            status="pending"
+                        )
+                        db.add(db_post)
+                    db.commit()
+                    db.close()
+                except Exception as e:
+                    results[file_path] = f"Error: {e}"
+            watch_session["results"] = results
+            watch_session["active"] = False
+    t = threading.Thread(target=session_watcher, daemon=True)
+    watch_session["thread"] = t
+    t.start()
+    return {"message": f"Started watching {path} for {duration} minutes."}
 
-@app.on_event("startup")
-def startup_event():
-    global watcher_thread, watcher_observer, watcher_stop_event
-    watcher_stop_event = threading.Event()
-    def run_watcher():
-        start_watcher(WATCHED_PATH, watcher_stop_event)
-    watcher_thread = threading.Thread(target=run_watcher, daemon=True)
-    watcher_thread.start()
+@app.post("/stop-watch-session/")
+def stop_watch_session():
+    global watch_session
+    """
+    Stop the current watch session early.
+    """
+    if not watch_session["active"]:
+        return {"message": "No active session."}
+    watch_session["stop_event"].set()
+    return {"message": "Session stopping."}
 
-@app.on_event("shutdown")
-def shutdown_event():
-    global watcher_thread, watcher_stop_event
-    if watcher_thread and watcher_thread.is_alive():
-        watcher_stop_event.set()
-        # Do not join here, let the thread exit naturally
+@app.get("/watch-session-status/")
+def watch_session_status():
+    global watch_session
+    """
+    Get the status of the current watch session.
+    """
+    if not watch_session["active"]:
+        return {
+            "active": False,
+            "results": watch_session.get("results")
+        }
+    return {
+        "active": True,
+        "path": watch_session["path"],
+        "end_time": watch_session["end_time"].isoformat(),
+        "changed_files": list(watch_session["changed_files"])
+    }
+
+@app.get("/watch-session-results/")
+def watch_session_results():
+    global watch_session
+    """
+    Get the generated content for the last session, grouped by file.
+    """
+    if watch_session["active"]:
+        return {"error": "Session still running."}
+    results = watch_session.get("results")
+    if not results:
+        return {"message": "No results available."}
+    # Grouped by file
+    return {"results": results}
 
 @app.get("/generated-posts/")
 def list_generated_posts():
@@ -275,11 +378,21 @@ def list_generated_posts():
         {
             "id": p.id,
             "file": p.file,
-            "content": p.content,
+            "content": str(p.content),  # Ensure content is always a string
             "status": p.status,
-            "platform": p.platform
+            "platform": p.platform,
+            "type": "custom" if p.file == "custom" else "ai"
         }
         for p in posts
     ]
     db.close()
     return result
+
+@app.post("/test-huggingface/")
+def test_huggingface(request: GenerateRequest) -> Dict[str, str]:
+    """
+    Test Hugging Face API content generation only.
+    """
+    prompt = request.prompt or DEFAULT_PROMPT
+    result = ask_hf_api(prompt)
+    return {"prompt": prompt, "huggingface_result": result}

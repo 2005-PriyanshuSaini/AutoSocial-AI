@@ -5,7 +5,7 @@ import requests
 import os
 
 # Set the path to the folder you want to observe
-WATCHED_DIR = r"D:\Code-Base\Auto-Social AI"  # Use raw string for Windows paths
+WATCHED_DIR = r"D:\Code-Base\DSA"  # Use raw string for Windows paths
 
 class ChangeHandler(FileSystemEventHandler):
     def on_any_event(self, event):
