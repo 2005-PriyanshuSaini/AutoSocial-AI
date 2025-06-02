@@ -7,7 +7,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, List, Any
-from ai import query_all_models
+from ai import askall_models as query_all_models
+from ai import ask_hf_api
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from watchdog.observers import Observer
@@ -17,6 +18,7 @@ from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker
 from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
 from datetime import datetime, timedelta
+from prompt_templates import DEFAULT_PROMPT
 
 # Store session state for watch session (move this to the top)
 watch_session = {
@@ -36,7 +38,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def read_index():
-    return FileResponse("static/index.html")
+    # Serve index.html using absolute path to avoid working directory issues
+    index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    return FileResponse(index_path)
 
 class ReviewRequest(BaseModel):
     post_id: int
@@ -76,8 +80,9 @@ def generate_content(request: GenerateRequest) -> Dict[str, Any]:
     if generation_cancel_event.is_set():
         return {"error": "Generation cancelled."}
     generation_count += 1
-    responses = query_all_models(request.prompt)
-    return {"prompt": request.prompt, "responses": responses}
+    prompt = request.prompt or DEFAULT_PROMPT
+    responses = query_all_models(prompt)
+    return {"prompt": prompt, "responses": responses}
 
 @app.get("/generation-stats/")
 def generation_stats():
@@ -382,3 +387,12 @@ def list_generated_posts():
     ]
     db.close()
     return result
+
+@app.post("/test-huggingface/")
+def test_huggingface(request: GenerateRequest) -> Dict[str, str]:
+    """
+    Test Hugging Face API content generation only.
+    """
+    prompt = request.prompt or DEFAULT_PROMPT
+    result = ask_hf_api(prompt)
+    return {"prompt": prompt, "huggingface_result": result}

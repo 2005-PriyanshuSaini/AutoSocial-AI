@@ -3,7 +3,7 @@ import requests
 import time
 from typing import Dict
 from dotenv import load_dotenv
-from mistral import generate_mistral_content
+from prompt_templates import DEFAULT_PROMPT
 
 # Load environment variables from .env file
 load_dotenv()
@@ -12,8 +12,13 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Set verbose logging for transformers
+os.environ["TRANSFORMERS_VERBOSITY"] = "info"
+# Optionally set cache dir:
+# os.environ["TRANSFORMERS_CACHE"] = "D:/Code-Base/Auto-Social AI/.hf_cache"
+
 # Function to call OpenAI (ChatGPT)
-def query_openai(prompt: str) -> str:
+def askopenai(prompt: str) -> str:
     url = "https://api.openai.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     data = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}]}
@@ -38,9 +43,17 @@ def query_openai(prompt: str) -> str:
     return "Error: OpenAI API failed after retries (rate limit or quota exceeded)."
 
 # Function to call Gemini (Google AI)
-def query_gemini(prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateText?key={GEMINI_API_KEY}"
-    data = {"contents": [{"parts": [{"text": prompt}]}]}
+def askgemini(prompt: str) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    data = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
     try:
         response = requests.post(url, json=data, timeout=10)
         if response.status_code == 404:
@@ -51,23 +64,48 @@ def query_gemini(prompt: str) -> str:
                     f"Full response: {response.text}")
         response.raise_for_status()
         resp_json = response.json()
-        # Debug: print full response for troubleshooting
-        if not ("candidates" in resp_json and resp_json["candidates"]):
-            return f"Error: Unexpected Gemini API response: {resp_json}"
-        return resp_json["candidates"][0].get("output", "No response")
+        # Parse the new response structure
+        if (
+            "candidates" in resp_json and
+            resp_json["candidates"] and
+            "content" in resp_json["candidates"][0] and
+            "parts" in resp_json["candidates"][0]["content"] and
+            resp_json["candidates"][0]["content"]["parts"]
+        ):
+            return resp_json["candidates"][0]["content"]["parts"][0].get("text", "No response")
+        return f"Error: Unexpected Gemini API response: {resp_json}"
     except requests.RequestException as e:
         return f"Error: {str(e)}"
 
-def query_mistral(prompt: str) -> str:
+def ask_hf_api(prompt: str, hf_token: str = None) -> str:
+    """
+    Generate content using Hugging Face Inference API (nous-hermes-2-mistral-7b-dpo).
+    """
+    if hf_token is None:
+        hf_token = os.getenv("HF_API_TOKEN") or "YOUR_HUGGINGFACE_TOKEN"
+    API_URL = "https://api-inference.huggingface.co/models/nousresearch/nous-hermes-2-mistral-7b-dpo"
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    data = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 150,
+            "temperature": 0.9,
+            "do_sample": True,
+        }
+    }
     try:
-        return generate_mistral_content(prompt)
+        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response.json()[0]["generated_text"]
     except Exception as e:
         return f"Error: {str(e)}"
 
-def query_all_models(prompt: str) -> Dict[str, str]:
+def askall_models(prompt: str = None) -> Dict[str, str]:
+    if prompt is None:
+        prompt = DEFAULT_PROMPT
     models = {
-        "ChatGPT": query_openai,
-        "Gemini": query_gemini,
-        "Mistral": query_mistral
+        "ChatGPT": askopenai,
+        "Gemini": askgemini,
+        "HuggingFace": ask_hf_api
     }
     return {model: func(prompt) for model, func in models.items()}
