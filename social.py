@@ -54,18 +54,25 @@ def fetch_linkedin_trending_topics():
     # TODO: Implement using third-party service or scraping if needed
     return ["LinkedIn trending topics API not available"]
 
-def post_to_linkedin(content):
+def post_to_linkedin(content, urn_type=None):
     """
-    Post content to LinkedIn.
-    Requires LINKEDIN_ACCESS_TOKEN and LINKEDIN_ORGANIZATION_URN or user URN in .env.
+    Post content to LinkedIn using the new /rest/posts endpoint.
+    Requires LINKEDIN_ACCESS_TOKEN and either LINKEDIN_ORGANIZATION_URN or LINKEDIN_AUTHOR_URN in .env.
+    urn_type: "author", "organization", or None (auto)
     """
     ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
-    ORGANIZATION_URN = os.getenv("LINKEDIN_ORGANIZATION_URN")  # e.g., "urn:li:organization:xxxx"
-    AUTHOR_URN = os.getenv("LINKEDIN_AUTHOR_URN")  # e.g., "urn:li:person:xxxx"
-    if not ACCESS_TOKEN or not (ORGANIZATION_URN or AUTHOR_URN):
-        return {"error": "Set LINKEDIN_ACCESS_TOKEN and LINKEDIN_ORGANIZATION_URN or LINKEDIN_AUTHOR_URN in .env"}
-    url = "https://api.linkedin.com/v2/ugcPosts"
-    author = ORGANIZATION_URN if ORGANIZATION_URN else AUTHOR_URN
+    ORGANIZATION_URN = os.getenv("LINKEDIN_ORGANIZATION_URN")
+    AUTHOR_URN = os.getenv("LINKEDIN_AUTHOR_URN")
+    # Choose URN based on urn_type
+    if urn_type == "author":
+        author = AUTHOR_URN
+    elif urn_type == "organization":
+        author = ORGANIZATION_URN
+    else:
+        author = AUTHOR_URN if AUTHOR_URN else ORGANIZATION_URN
+    if not ACCESS_TOKEN or not author:
+        return {"error": "Set LINKEDIN_ACCESS_TOKEN and the appropriate URN in .env"}
+    url = "https://api.linkedin.com/v2/ugcPosts"  # <-- classic endpoint
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",
         "Content-Type": "application/json",
@@ -84,7 +91,11 @@ def post_to_linkedin(content):
     }
     try:
         resp = requests.post(url, headers=headers, json=data, timeout=10)
+        # Debug output for troubleshooting
+        print("LinkedIn POST request data:", data)
+        print("LinkedIn POST response status:", resp.status_code)
+        print("LinkedIn POST response text:", resp.text)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"error": f"Error posting to LinkedIn: {e}"}
+        return {"error": f"Error posting to LinkedIn: {e}", "response": getattr(resp, "text", None)}

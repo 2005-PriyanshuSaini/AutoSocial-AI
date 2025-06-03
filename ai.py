@@ -11,6 +11,7 @@ load_dotenv()
 # Load API keys from environment variables (SECURITY FIX)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+HF_API_KEY = os.getenv("HF_API_KEY")  # <-- Add this line
 
 # Set verbose logging for transformers
 os.environ["TRANSFORMERS_VERBOSITY"] = "info"
@@ -79,11 +80,13 @@ def askgemini(prompt: str) -> str:
 
 def ask_hf_api(prompt: str, hf_token: str = None) -> str:
     """
-    Generate content using Hugging Face Inference API (nous-hermes-2-mistral-7b-dpo).
+    Generate content using Hugging Face Inference API (Nous Hermes 2 - Mistral 7B - DPO).
     """
     if hf_token is None:
-        hf_token = os.getenv("HF_API_TOKEN") or "YOUR_HUGGINGFACE_TOKEN"
-    API_URL = "https://api-inference.huggingface.co/models/nousresearch/nous-hermes-2-mistral-7b-dpo"
+        hf_token = HF_API_KEY
+    if not hf_token:
+        return "Error: Hugging Face API token not set. Please add HF_API_KEY to your .env file."
+    API_URL = "https://api-inference.huggingface.co/models/NousResearch/Nous-Hermes-2-Mistral-7B-DPO"  # <-- corrected model name (case-sensitive)
     headers = {"Authorization": f"Bearer {hf_token}"}
     data = {
         "inputs": prompt,
