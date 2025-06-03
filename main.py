@@ -50,6 +50,7 @@ class PostRequest(BaseModel):
     post_id: int
     platform: str  # "twitter" or "linkedin"
     content: str
+    urn_type: str = None  # "author", "organization", or None
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -142,7 +143,8 @@ def post_content(request: PostRequest):
     if request.platform == "twitter":
         result = post_to_x(post.content)
     elif request.platform == "linkedin":
-        result = post_to_linkedin(post.content)
+        # Pass urn_type to post_to_linkedin
+        result = post_to_linkedin(post.content, urn_type=request.urn_type)
     else:
         result = {"error": "Unsupported platform"}
     return {"message": f"Post published to {request.platform}: {post.content}", "result": result}
