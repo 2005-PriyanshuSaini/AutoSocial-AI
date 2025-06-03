@@ -254,6 +254,7 @@
                     <select id="post-platform" class="input-field">
                         <option value="twitter">🐦 Twitter</option>
                         <option value="linkedin">💼 LinkedIn</option>
+                        <option value="both">🌐 Both</option>
                     </select>
                     <input id="post-id" class="input-field" type="number" placeholder="Enter Post ID to publish" />
                     <button class="btn-primary" onclick="postContent()">
@@ -450,11 +451,15 @@
                 showResult('post-result', 'Please enter a valid Post ID.');
                 return;
             }
+            let platformValue = platform;
+            if (platform === "both") {
+                platformValue = ["twitter", "linkedin"];
+            }
             try {
                 const res = await fetch('/post-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({post_id, platform, content: ""})
+                    body: JSON.stringify({post_id, platform: platformValue, content: ""})
                 });
                 const data = await res.json();
                 showResult('post-result', JSON.stringify(data, null, 2));

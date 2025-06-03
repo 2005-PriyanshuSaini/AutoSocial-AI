@@ -3,8 +3,9 @@ import time
 import random
 import requests
 import threading
+import difflib
 from pathlib import Path
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, Body
 from pydantic import BaseModel
 from typing import Dict, List, Any
 from ai import askall_models as query_all_models
@@ -19,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
 from datetime import datetime, timedelta
 from prompt_templates import DEFAULT_PROMPT
+from fastapi_utils.tasks import repeat_every
 
 # Store session state for watch session (move this to the top)
 watch_session = {
@@ -48,7 +50,7 @@ class ReviewRequest(BaseModel):
 
 class PostRequest(BaseModel):
     post_id: int
-    platform: str  # "twitter" or "linkedin"
+    platform: Any  # Accept str or list
     content: str
     urn_type: str = None  # "author", "organization", or None
 
@@ -67,6 +69,15 @@ class GeneratedPost(Base):
     content = Column(Text, nullable=False)
     status = Column(String, default="pending")  # pending, approved, rejected, posted
     platform = Column(String, nullable=True)    # Set when posted
+
+# Add a new SQLAlchemy model for session summary posts if not already present
+class SessionSummaryPost(Base):
+    __tablename__ = "session_summary_posts"
+    id = Column(Integer, primary_key=True, index=True)
+    summary = Column(Text, nullable=False)
+    status = Column(String, default="pending")  # pending, approved, posted
+    platform = Column(String, nullable=True)
+    created_at = Column(String, default=lambda: datetime.now().isoformat())
 
 # Create tables if not exist
 Base.metadata.create_all(bind=engine)
@@ -135,19 +146,21 @@ def post_content(request: PostRequest):
         db.close()
         return {"error": "Post must be approved before publishing."}
     post.status = "posted"
-    post.platform = request.platform
-    db.commit()
-    db.refresh(post)
+    # Support posting to multiple platforms
+    platforms = request.platform if isinstance(request.platform, list) else [request.platform]
+    results = {}
+    for platform in platforms:
+        post.platform = platform
+        db.commit()
+        db.refresh(post)
+        if platform == "twitter":
+            results["twitter"] = post_to_x(post.content)
+        elif platform == "linkedin":
+            results["linkedin"] = post_to_linkedin(post.content, urn_type=request.urn_type)
+        else:
+            results[platform] = {"error": "Unsupported platform"}
     db.close()
-    # Actually post to the selected platform
-    if request.platform == "twitter":
-        result = post_to_x(post.content)
-    elif request.platform == "linkedin":
-        # Pass urn_type to post_to_linkedin
-        result = post_to_linkedin(post.content, urn_type=request.urn_type)
-    else:
-        result = {"error": "Unsupported platform"}
-    return {"message": f"Post published to {request.platform}: {post.content}", "result": result}
+    return {"message": f"Post published to {', '.join(platforms)}: {post.content}", "result": results}
 
 @app.post("/submit-custom-content/")
 def submit_custom_content(request: CustomContentRequest):
@@ -254,7 +267,7 @@ def start_watcher(path, stop_event):
 
 @app.post("/start-watch-session/")
 async def start_watch_session(request: Request, background_tasks: BackgroundTasks):
-    global watch_session
+    global watch_session, previous_file_contents
     """
     Start a watch session for a given folder and duration (in minutes).
     """
@@ -281,6 +294,16 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
         "end_time": datetime.now() + timedelta(minutes=duration),
         "results": None
     })
+    # At session start, store current content of all files in the watched path
+    previous_file_contents = {}
+    for root, dirs, files in os.walk(path):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    previous_file_contents[fpath] = f.read()
+            except Exception:
+                continue
     def session_watcher():
         class SessionHandler(FileSystemEventHandler):
             def on_any_event(self, event):
@@ -300,12 +323,19 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
         finally:
             observer.stop()
             observer.join()
-            # After session ends, generate content for all changed files
             changed_files = list(watch_session["changed_files"])
             results = {}
+            diff_summaries = {}
             for file_path in changed_files:
-                prompt = f"Session change detected in {file_path}"
                 try:
+                    old_content = previous_file_contents.get(file_path, "")
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        new_content = f.read()
+                    diff_summary = summarize_file_change(file_path, old_content, new_content)
+                    diff_summaries[file_path] = diff_summary
+                    # Use SUMMARY_PROMPT_TEMPLATE for AI
+                    from prompt_templates import SUMMARY_PROMPT_TEMPLATE
+                    prompt = SUMMARY_PROMPT_TEMPLATE.format(diff_summary=diff_summary)
                     gen_resp = requests.post("http://127.0.0.1:8000/generate-content/", json={"prompt": prompt})
                     responses = gen_resp.json().get("responses", {})
                     results[file_path] = responses
@@ -322,7 +352,9 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                     db.close()
                 except Exception as e:
                     results[file_path] = f"Error: {e}"
-            watch_session["results"] = results
+            # --- Session-level summary ---
+            session_summary = generate_session_summary(diff_summaries)
+            watch_session["results"] = {"file_summaries": results, "session_summary": session_summary}
             watch_session["active"] = False
     t = threading.Thread(target=session_watcher, daemon=True)
     watch_session["thread"] = t
@@ -342,59 +374,136 @@ def stop_watch_session():
 
 @app.get("/watch-session-status/")
 def watch_session_status():
-    global watch_session
-    """
+    """bal watch_session
     Get the status of the current watch session.
-    """
+    """ the status of the current watch session.
     if not watch_session["active"]:
-        return {
+        return {_session["active"]:
             "active": False,
             "results": watch_session.get("results")
-        }
+        }   "results": watch_session.get("results")
     return {
         "active": True,
         "path": watch_session["path"],
         "end_time": watch_session["end_time"].isoformat(),
         "changed_files": list(watch_session["changed_files"])
+    }   "changed_files": list(watch_session["changed_files"])
     }
-
 @app.get("/watch-session-results/")
 def watch_session_results():
     global watch_session
-    """
-    Get the generated content for the last session, grouped by file.
-    """
     if watch_session["active"]:
         return {"error": "Session still running."}
     results = watch_session.get("results")
     if not results:
         return {"message": "No results available."}
-    # Grouped by file
-    return {"results": results}
+    # Only return the session summary and file summaries
+    return {
+        "file_summaries": results.get("file_summaries"),
+        "session_summary": results.get("session_summary")
+    }
 
-@app.get("/generated-posts/")
-def list_generated_posts():
+@app.post("/approve-session-summary/")
+def approve_session_summary(data: Dict[str, str] = Body(...)):
+    """
+    Approve and store the session summary for posting.
+    Expects: {"summary": "...", "platform": "twitter" or "linkedin" (optional)}
+    """
+    summary = data.get("summary")
+    platform = data.get("platform")
+    if not summary:
+        return {"error": "Summary is required."}
     db = SessionLocal()
-    posts = db.query(GeneratedPost).all()
+    post = SessionSummaryPost(summary=summary, status="approved", platform=platform)
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    db.close()
+    return {"message": "Session summary approved and saved.", "id": post.id}
+
+@app.get("/session-summary-posts/")
+def list_session_summary_posts():
+    """
+    List all session summary posts (approved or posted).
+    """
+    db = SessionLocal()
+    posts = db.query(SessionSummaryPost).all()
     result = [
         {
             "id": p.id,
-            "file": p.file,
-            "content": str(p.content),  # Ensure content is always a string
+            "summary": p.summary,
             "status": p.status,
             "platform": p.platform,
-            "type": "custom" if p.file == "custom" else "ai"
+            "created_at": p.created_at
         }
         for p in posts
     ]
     db.close()
     return result
 
+@app.get("/generated-posts/")
+def list_generated_posts():")
+    db = SessionLocal()s():
+    posts = db.query(GeneratedPost).all()
+    result = [.query(GeneratedPost).all()
+        {t = [
+            "id": p.id,
+            "file": p.file,
+            "content": str(p.content),  # Ensure content is always a string
+            "status": p.status,ntent),  # Ensure content is always a string
+            "platform": p.platform,
+            "type": "custom" if p.file == "custom" else "ai"
+        }   "type": "custom" if p.file == "custom" else "ai"
+        for p in posts
+    ]   for p in posts
+    db.close()
+    return result
+    return result
 @app.post("/test-huggingface/")
 def test_huggingface(request: GenerateRequest) -> Dict[str, str]:
-    """
+    """t_huggingface(request: GenerateRequest) -> Dict[str, str]:
     Test Hugging Face API content generation only.
-    """
+    """t Hugging Face API content generation only.
     prompt = request.prompt or DEFAULT_PROMPT
-    result = ask_hf_api(prompt)
+    result = ask_hf_api(prompt)DEFAULT_PROMPT
     return {"prompt": prompt, "huggingface_result": result}
+
+def summarize_file_change(file_path, old_content, new_content):
+    diff = difflib.unified_diff(
+        old_content.splitlines(), new_content.splitlines(),
+        fromfile='before', tofile='after', lineterm=''
+    )
+    diff_text = '\n'.join(diff)
+    return diff_text
+
+def generate_session_summary(changes):
+    from prompt_templates import SUMMARY_PROMPT_TEMPLATE
+    # Aggregate all diffs into one prompt
+    all_diffs = ""
+    for file, summary in changes.items():
+        all_diffs += f"File: {file}\nChanges:\n{summary}\n\n"
+    prompt = SUMMARY_PROMPT_TEMPLATE.format(diff_summary=all_diffs)
+    # Use only one model or all, as you prefer
+    return query_all_models(prompt)
+
+@app.on_event("startup")
+@repeat_every(seconds=60*60)  # Check every hour
+def monthly_post_task() -> None:
+    from prompt_templates import SUMMARY_PROMPT_TEMPLATE
+    now = datetime.now()
+    if now.day == 1 and now.hour == 0:  # Only run at midnight on the 1st
+        db = SessionLocal()
+        # Compose a monthly summary prompt (customize as needed)
+        prompt = (
+            "It's the start of a new month! Write a professional, engaging summary post for our project's progress and plans for this month, suitable for both Twitter and LinkedIn."
+        )
+        summary = query_all_models(prompt)
+        # Store as a session summary post
+        post = SessionSummaryPost(summary=str(summary), status="approved", platform="both")
+        db.add(post)
+        db.commit()
+        db.refresh(post)
+        # Post to both platforms
+        post_to_x(str(summary))
+        post_to_linkedin(str(summary))
+        db.close()
