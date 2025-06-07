@@ -189,13 +189,13 @@
                 <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('watch')">
                     📁 Watch
                 </button>
-                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('manage')">
-                    📋 Manage
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('history')">
+                    🕓 History
                 </button>
             </div>
         </div>
 
-        <!-- Generate Content Tab -->
+        <!-- Generate Content Tab (now includes manage functionality) -->
         <div id="generate" class="tab-content active">
             <div class="bg-white rounded-lg card-shadow p-6">
                 <div class="mb-4">
@@ -206,10 +206,28 @@
                 </div>
                 <div class="space-y-4">
                     <input id="gen-prompt" class="input-field" placeholder="Enter your content prompt..." />
+                    <select id="gen-platform" class="input-field">
+                        <option value="twitter">🐦 X (Twitter) - Short</option>
+                        <option value="linkedin">💼 LinkedIn - Detailed</option>
+                    </select>
                     <button class="btn-primary" onclick="generateContent()">Generate Content</button>
                     <div id="gen-result" class="result-box" style="display: none;">
-                        <h4 class="font-medium mb-2">Result:</h4>
-                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                        <h4 class="font-medium mb-2">Results by Model:</h4>
+                        <div id="model-results"></div>
+                    </div>
+                </div>
+                <!-- --- Manage Content Section (custom content submission) --- -->
+                <div class="section-divider mt-8">
+                    <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                        ✏️ Submit Custom Content
+                    </h3>
+                    <div class="space-y-4">
+                        <textarea id="custom-content" class="input-field" placeholder="Write your own content here..." rows="4"></textarea>
+                        <button class="btn-primary" onclick="submitCustomContent()">Submit for Approval</button>
+                        <div id="custom-content-result" class="result-box" style="display: none;">
+                            <h4 class="font-medium mb-2">Result:</h4>
+                            <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -313,41 +331,19 @@
             </div>
         </div>
 
-        <!-- Manage Content Tab -->
-        <div id="manage" class="tab-content">
+        <!-- History Tab -->
+        <div id="history" class="tab-content">
             <div class="bg-white rounded-lg card-shadow p-6">
                 <div class="mb-4">
                     <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
-                        📋 Content Management
+                        🕓 Post History
                     </h2>
-                    <p class="text-slate-600">Review, manage, and submit content for approval and publishing</p>
+                    <p class="text-slate-600">View all approved and posted content</p>
                 </div>
-                
-                <!-- Custom Content Submission Section -->
-                <div class="mb-6">
-                    <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
-                        ✏️ Submit Custom Content
-                    </h3>
-                    <div class="space-y-4">
-                        <textarea id="custom-content" class="input-field" placeholder="Write your own content here..." rows="4"></textarea>
-                        <button class="btn-primary" onclick="submitCustomContent()">Submit for Approval</button>
-                        <div id="custom-content-result" class="result-box" style="display: none;">
-                            <h4 class="font-medium mb-2">Result:</h4>
-                            <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Generated Content List Section -->
-                <div class="section-divider">
-                    <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
-                        📝 Generated Content for Approval
-                    </h3>
-                    <div class="space-y-4">
-                        <button class="btn-primary" onclick="loadGeneratedPosts()">Refresh Content List</button>
-                        <div id="generated-list" class="scroll-area">
-                            <p class="text-slate-500 text-center py-8">No generated content yet.</p>
-                        </div>
+                <div class="space-y-4">
+                    <button class="btn-primary" onclick="loadHistoryPosts()">Refresh History</button>
+                    <div id="history-list" class="scroll-area">
+                        <p class="text-slate-500 text-center py-8">No approved or posted content yet.</p>
                     </div>
                 </div>
             </div>
@@ -370,12 +366,20 @@
             
             // Add active class to clicked button
             event.target.classList.add('active');
+
+            // Auto-load history when switching to the history tab
+            if (tabName === 'history') {
+                loadHistoryPosts();
+            }
         }
 
         // Update platform text when selection changes
         document.getElementById('post-platform').addEventListener('change', function() {
             const platform = this.value;
-            const platformText = platform === 'twitter' ? 'Post to Twitter' : 'Post to LinkedIn';
+            let platformText = '';
+            if (platform === 'twitter') platformText = 'Post to Twitter';
+            else if (platform === 'linkedin') platformText = 'Post to LinkedIn';
+            else if (platform === 'both') platformText = 'Post to Both';
             document.getElementById('platform-text').textContent = platformText;
         });
 
@@ -387,45 +391,74 @@
             resultDiv.style.display = 'block';
         }
 
+        // Clean content by removing unnecessary formatting
+        function cleanContent(text) {
+            // Remove markdown bold/italic and heading markers
+            return text
+                .replace(/[*_~`#>-]+/g, '') // Remove *, _, ~, `, #, >, -
+                .replace(/\n{3,}/g, '\n\n') // Collapse multiple newlines
+                .trim();
+        }
+
         // API Functions
         async function generateContent() {
             const prompt = document.getElementById('gen-prompt').value;
-            // Ask for user confirmation before generating content
-            if (!confirm("Do you want to generate content for this prompt?")) {
-                return;
+            const platform = document.getElementById('gen-platform').value;
+            document.getElementById('gen-result').style.display = 'block';
+            document.getElementById('model-results').innerHTML = '<div class="text-slate-600">Please wait, generating content...</div>';
+            // Add platform-specific instruction to the prompt
+            let platformPrompt = prompt;
+            if (platform === "twitter") {
+                platformPrompt += "\n\nWrite a short, concise post (max 280 characters) suitable for X (Twitter). Avoid markdown, stars, hyphens, and headings.";
+            } else if (platform === "linkedin") {
+                platformPrompt += "\n\nWrite a detailed, professional LinkedIn post. Avoid markdown, stars, hyphens, and headings.";
             }
             try {
                 const res = await fetch('/generate-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({prompt})
+                    body: JSON.stringify({prompt: platformPrompt})
                 });
                 const data = await res.json();
-                // Show only the main message if present, else fallback to JSON
-                let display = "";
-                if (data && data.responses && data.responses.ChatGPT) {
-                    try {
-                        // Try to parse if it's a JSON string
-                        const parsed = JSON.parse(data.responses.ChatGPT);
-                        if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
-                            display = parsed.choices[0].message.content;
-                        } else if (parsed.message && typeof parsed.message === "string") {
-                            display = parsed.message;
-                        } else {
-                            display = data.responses.ChatGPT;
-                        }
-                    } catch {
-                        display = data.responses.ChatGPT;
+                let responses = data.model_responses || data.responses;
+                if (responses && typeof responses === "object") {
+                    let html = '';
+                    for (const [model, content] of Object.entries(responses)) {
+                        html += `<div class="mb-4 p-2 border rounded">
+                            <b>${model}:</b>
+                            <pre>${cleanContent(content)}</pre>
+                            <button class="btn-primary" onclick="editOrSaveContent('${model}', \`${cleanContent(content).replace(/`/g, '\\`')}\`)">Use/Edit This</button>
+                        </div>`;
                     }
-                } else if (data && data.responses && typeof data.responses === "string") {
-                    display = data.responses;
+                    document.getElementById('model-results').innerHTML = html;
                 } else {
-                    display = JSON.stringify(data, null, 2);
+                    document.getElementById('model-results').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
                 }
-                showResult('gen-result', display);
             } catch (error) {
-                showResult('gen-result', 'Error generating content');
+                document.getElementById('model-results').innerHTML = '<div class="text-red-600">Error generating content</div>';
             }
+        }
+
+        function editOrSaveContent(model, content) {
+            document.getElementById('model-results').innerHTML = `
+                <b>Editing content from ${model}:</b>
+                <textarea id="edit-content" style="width:100%;height:120px;">${content}</textarea>
+                <div class="flex gap-2 mt-2">
+                    <button class="btn-primary" onclick="saveContent('${model}')">Save and Get Post ID</button>
+                    <button class="btn-secondary" onclick="cancelEditContent()">Cancel</button>
+                </div>
+            `;
+        }
+
+        async function saveContent(model) {
+            const content = document.getElementById('edit-content').value;
+            const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model)}&content=${encodeURIComponent(content)}`, {method: 'POST'});
+            const data = await res.json();
+            document.getElementById('model-results').innerHTML = `<b>${data.message}</b>`;
+        }
+
+        function cancelEditContent() {
+            document.getElementById('gen-result').style.display = 'none';
         }
 
         async function reviewContent() {
@@ -571,7 +604,6 @@
                 const res = await fetch('/generated-posts/');
                 const posts = await res.json();
                 let html = '';
-                
                 if (posts.length === 0) {
                     html = '<p class="text-slate-500 text-center py-8">No generated content yet.</p>';
                 } else {
@@ -579,7 +611,21 @@
                         const statusBadge = getStatusBadge(post.status, post.type);
                         const cardClass = post.type === 'custom' ? 'post-card custom-post-card' : 'post-card';
                         const typeLabel = post.type === 'custom' ? '✏️ Custom Content' : '🤖 AI Generated';
-                        
+                        // Only show action buttons if not approved
+                        let actionButtons = '';
+                        if (post.status !== 'approved') {
+                            actionButtons = `
+                                <button class="btn-secondary btn-success" onclick="approvePost(${post.id})">
+                                    ✅ Approve
+                                </button>
+                                <button class="btn-secondary btn-danger" onclick="rejectPost(${post.id})">
+                                    ❌ Reject
+                                </button>
+                                <button class="btn-secondary btn-outline" onclick="publishPost(${post.id})">
+                                    📤 Publish
+                                </button>
+                            `;
+                        }
                         html += `
                             <div class="${cardClass}">
                                 <div class="flex items-start justify-between mb-3">
@@ -596,15 +642,7 @@
                                     <pre class="whitespace-pre-wrap">${post.content}</pre>
                                 </div>
                                 <div class="flex gap-2 flex-wrap">
-                                    <button class="btn-secondary btn-success" onclick="approvePost(${post.id})">
-                                        ✅ Approve
-                                    </button>
-                                    <button class="btn-secondary btn-danger" onclick="rejectPost(${post.id})">
-                                        ❌ Reject
-                                    </button>
-                                    <button class="btn-secondary btn-outline" onclick="publishPost(${post.id})">
-                                        📤 Publish
-                                    </button>
+                                    ${actionButtons}
                                 </div>
                             </div>
                         `;
@@ -613,6 +651,47 @@
                 document.getElementById('generated-list').innerHTML = html;
             } catch (error) {
                 document.getElementById('generated-list').innerHTML = '<p class="text-red-500 text-center py-8">Error loading content</p>';
+            }
+        }
+
+        async function loadHistoryPosts() {
+            try {
+                const res = await fetch('/generated-posts/');
+                const posts = await res.json();
+                let html = '';
+                // Only show approved or posted
+                const filtered = posts.filter(p => p.status === 'approved' || p.status === 'posted');
+                // Sort so newest posts come first
+                filtered.sort((a, b) => b.id - a.id);
+                if (filtered.length === 0) {
+                    html = '<p class="text-slate-500 text-center py-8">No approved or posted content yet.</p>';
+                } else {
+                    for (const post of filtered) {
+                        const statusBadge = getStatusBadge(post.status, post.type);
+                        const cardClass = post.type === 'custom' ? 'post-card custom-post-card' : 'post-card';
+                        const typeLabel = post.type === 'custom' ? '✏️ Custom Content' : '🤖 AI Generated';
+                        html += `
+                            <div class="${cardClass}">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-sm font-medium text-slate-600">${typeLabel}</span>
+                                        </div>
+                                        <p class="font-medium">ID: ${post.id}</p>
+                                        <p class="text-sm text-slate-600">File: ${post.file}</p>
+                                    </div>
+                                    ${statusBadge}
+                                </div>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3">
+                                    <pre class="whitespace-pre-wrap">${post.content}</pre>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                document.getElementById('history-list').innerHTML = html;
+            } catch (error) {
+                document.getElementById('history-list').innerHTML = '<p class="text-red-500 text-center py-8">Error loading history</p>';
             }
         }
 

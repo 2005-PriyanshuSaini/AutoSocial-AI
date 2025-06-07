@@ -7,4 +7,3 @@ venv/
 *.sqlite3
 node_modules/
 .DS_Store
-hello how is it going on 
