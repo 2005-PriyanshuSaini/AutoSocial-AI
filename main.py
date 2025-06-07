@@ -9,14 +9,31 @@ from fastapi import FastAPI, Request, BackgroundTasks, Body, Query
 from pydantic import BaseModel
 from typing import Dict, List, Any
 from ai import askall_models as query_all_models
-from ai import ask_hf_api
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from db import SessionLocal, Base, engine
-from sqlalchemy import Column, Integer, String, Text
+from db import (
+    GeneratedPost,
+    SessionSummaryPost,
+    WatchSessionLog,
+    FileChangeLog,
+    create_all_tables,
+    add_generated_post,
+    update_generated_post_content,
+    set_generated_post_status,
+    list_generated_posts,
+    add_session_summary_post,
+    add_watch_session_log,
+    update_watch_session_log,
+    add_file_change_log,
+    SessionLocal,
+    Base,
+    engine,
+)
+from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import func
 from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
 from datetime import datetime, timedelta
 from prompt_templates import DEFAULT_PROMPT
@@ -65,26 +82,30 @@ class EditContentRequest(BaseModel):
     post_id: int
     new_content: str
 
-# SQLAlchemy model for generated posts
-class GeneratedPost(Base):
-    __tablename__ = "generated_posts"
-    id = Column(Integer, primary_key=True, index=True)
-    file = Column(String, nullable=False)
-    content = Column(Text, nullable=False)
-    status = Column(String, default="pending")  # pending, approved, rejected, posted
-    platform = Column(String, nullable=True)    # Set when posted
+# Remove all SQLAlchemy model class definitions from main.py
+# Instead, import them from db.py
 
-# Add a new SQLAlchemy model for session summary posts if not already present
-class SessionSummaryPost(Base):
-    __tablename__ = "session_summary_posts"
-    id = Column(Integer, primary_key=True, index=True)
-    summary = Column(Text, nullable=False)
-    status = Column(String, default="pending")  # pending, approved, posted
-    platform = Column(String, nullable=True)
-    created_at = Column(String, default=lambda: datetime.now().isoformat())
+from db import (
+    GeneratedPost,
+    SessionSummaryPost,
+    WatchSessionLog,
+    FileChangeLog,
+    create_all_tables,
+    add_generated_post,
+    update_generated_post_content,
+    set_generated_post_status,
+    list_generated_posts,
+    add_session_summary_post,
+    add_watch_session_log,
+    update_watch_session_log,
+    add_file_change_log,
+    SessionLocal,
+    Base,
+    engine,
+)
 
 # Create tables if not exist
-Base.metadata.create_all(bind=engine)
+create_all_tables()
 
 # Track generation stats and cancellation
 generation_count = 0
@@ -253,6 +274,11 @@ def start_watcher(path, stop_event):
                 return
             if is_ignored(event.src_path, GITIGNORE_PATTERNS):
                 return
+            # --- FIX: Only generate content if not in a watch session ---
+            if watch_session.get("active"):
+                # Only record the file as changed, do not generate content here
+                watch_session["changed_files"].add(os.path.abspath(event.src_path))
+                return
             msg = f"Change detected in {event.src_path}, generating content..."
             print(msg)
             try:
@@ -296,11 +322,14 @@ def start_watcher(path, stop_event):
 async def start_watch_session(request: Request, background_tasks: BackgroundTasks):
     global watch_session, previous_file_contents
     """
-    Start a watch session for a given folder and duration (in minutes).
+    Start a watch session for a given folder and duration.
+    Accepts duration and duration_unit ('minutes' or 'hours').
     """
     data = await request.json()
     path = data.get("path")
-    duration = data.get("duration")  # in minutes
+    duration = data.get("duration")  # numeric value
+    duration_unit = data.get("duration_unit", "minutes")  # default to minutes if not provided
+
     if not path or not os.path.exists(path):
         return JSONResponse({"error": "Invalid path"}, status_code=400)
     try:
@@ -309,16 +338,25 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
             raise ValueError()
     except Exception:
         return JSONResponse({"error": "Invalid duration"}, status_code=400)
+    if duration_unit not in ("minutes", "hours"):
+        return JSONResponse({"error": "Invalid duration_unit. Use 'minutes' or 'hours'."}, status_code=400)
     if watch_session["active"]:
         return JSONResponse({"error": "A session is already active."}, status_code=400)
     stop_event = threading.Event()
+    # Calculate end_time based on unit
+    if duration_unit == "hours":
+        end_time = datetime.now() + timedelta(hours=duration)
+        duration_minutes = duration * 60
+    else:
+        end_time = datetime.now() + timedelta(minutes=duration)
+        duration_minutes = duration
     watch_session.update({
         "active": True,
         "changed_files": set(),
         "thread": None,
         "stop_event": stop_event,
         "path": path,
-        "end_time": datetime.now() + timedelta(minutes=duration),
+        "end_time": end_time,
         "results": None
     })
     # At session start, store current content of all files in the watched path
@@ -331,7 +369,12 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                     previous_file_contents[fpath] = f.read()
             except Exception:
                 continue
-    def session_watcher():
+
+    # --- FIX: create session_log and pass session_log_id into the thread ---
+    session_log = add_watch_session_log(path, duration_minutes)
+    session_log_id = session_log.id
+
+    def session_watcher(session_log_id=session_log_id):
         class SessionHandler(FileSystemEventHandler):
             def on_any_event(self, event):
                 if event.is_directory:
@@ -344,7 +387,9 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
         observer.start()
         try:
             while not stop_event.is_set():
+                # --- FIX: check time and stop session if over ---
                 if datetime.now() >= watch_session["end_time"]:
+                    stop_event.set()
                     break
                 time.sleep(1)
         finally:
@@ -353,6 +398,7 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
             changed_files = list(watch_session["changed_files"])
             results = {}
             diff_summaries = {}
+            db = SessionLocal()
             for file_path in changed_files:
                 try:
                     old_content = previous_file_contents.get(file_path, "")
@@ -364,10 +410,11 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                     from prompt_templates import SUMMARY_PROMPT_TEMPLATE
                     prompt = SUMMARY_PROMPT_TEMPLATE.format(diff_summary=diff_summary)
                     gen_resp = requests.post("http://127.0.0.1:8000/generate-content/", json={"prompt": prompt})
-                    responses = gen_resp.json().get("responses", {})
+                    # --- FIX: use model_responses for new API, fallback to responses ---
+                    resp_json = gen_resp.json()
+                    responses = resp_json.get("model_responses") or resp_json.get("responses", {})
                     results[file_path] = responses
                     # Save each model's content as a separate DB row
-                    db = SessionLocal()
                     for model_name, content in responses.items():
                         db_post = GeneratedPost(
                             file=f"{file_path} [{model_name}]",
@@ -375,18 +422,32 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                             status="pending"
                         )
                         db.add(db_post)
+                    # Save file change log
+                    file_log = FileChangeLog(
+                        session_id=session_log_id,
+                        file_path=file_path,
+                        diff_summary=diff_summary,
+                        ai_results=str(responses)
+                    )
+                    db.add(file_log)
                     db.commit()
-                    db.close()
                 except Exception as e:
                     results[file_path] = f"Error: {e}"
             # --- Session-level summary ---
             session_summary = generate_session_summary(diff_summaries)
+            # Update session log with summary and end time
+            session_log = db.query(WatchSessionLog).filter(WatchSessionLog.id == session_log_id).first()
+            session_log.ended_at = datetime.now()
+            session_log.result_summary = str(session_summary)
+            db.commit()
+            db.close()
             watch_session["results"] = {"file_summaries": results, "session_summary": session_summary}
             watch_session["active"] = False
+
     t = threading.Thread(target=session_watcher, daemon=True)
     watch_session["thread"] = t
     t.start()
-    return {"message": f"Started watching {path} for {duration} minutes."}
+    return {"message": f"Started watching {path} for {duration} {duration_unit}."}
 
 @app.post("/stop-watch-session/")
 def stop_watch_session():
@@ -417,32 +478,93 @@ def watch_session_status():
         "changed_files": list(watch_session["changed_files"])
     }
 
+@app.get("/watch-session-results/")
+def watch_session_results():
+    """
+    Return the results of the last completed watch session.
+    """
+    global watch_session
+    if watch_session.get("results"):
+        return watch_session["results"]
+    return {"error": "No session results available."}
+
 @app.get("/generated-posts/")
-def list_generated_posts():
+def list_generated_posts(include_all: bool = False):
+    """
+    List generated posts.
+    By default, returns all posts. If include_all=false, returns only approved/posted.
+    You can pass ?include_all=true to get all posts including pending/rejected.
+    """
     db = SessionLocal()
     posts = db.query(GeneratedPost).all()
     result = [
         {
             "id": p.id,
             "file": p.file,
-            "content": str(p.content),  # Ensure content is always a string
+            "content": str(p.content),
             "status": p.status,
             "platform": p.platform,
             "type": "custom" if p.file == "custom" else "ai"
+        }
+        for p in posts
+        if include_all or p.status in ("approved", "posted")
+    ]
+    db.close()
+    return result
+
+# --- Add endpoints for other tables for admin/debugging ---
+
+@app.get("/session-summary-posts/")
+def list_session_summary_posts():
+    db = SessionLocal()
+    posts = db.query(SessionSummaryPost).all()
+    result = [
+        {
+            "id": p.id,
+            "summary": str(p.summary),
+            "status": p.status,
+            "platform": p.platform,
+            "created_at": p.created_at
         }
         for p in posts
     ]
     db.close()
     return result
 
-@app.post("/test-huggingface/")
-def test_huggingface(request: GenerateRequest) -> Dict[str, str]:
-    """
-    Test Hugging Face API content generation only.
-    """
-    prompt = request.prompt or DEFAULT_PROMPT
-    result = ask_hf_api(prompt)
-    return {"prompt": prompt, "huggingface_result": result}
+@app.get("/watch-session-logs/")
+def list_watch_session_logs():
+    db = SessionLocal()
+    logs = db.query(WatchSessionLog).all()
+    result = [
+        {
+            "id": l.id,
+            "started_at": l.started_at.isoformat() if l.started_at else None,
+            "ended_at": l.ended_at.isoformat() if l.ended_at else None,
+            "path": l.path,
+            "duration_minutes": l.duration_minutes,
+            "result_summary": l.result_summary
+        }
+        for l in logs
+    ]
+    db.close()
+    return result
+
+@app.get("/file-change-logs/")
+def list_file_change_logs():
+    db = SessionLocal()
+    logs = db.query(FileChangeLog).all()
+    result = [
+        {
+            "id": l.id,
+            "session_id": l.session_id,
+            "file_path": l.file_path,
+            "diff_summary": l.diff_summary,
+            "ai_results": l.ai_results
+        }
+        for l in logs
+    ]
+    db.close()
+    return result
 
 def summarize_file_change(file_path, old_content, new_content):
     diff = difflib.unified_diff(
@@ -467,19 +589,21 @@ def generate_session_summary(changes):
 def monthly_post_task() -> None:
     from prompt_templates import SUMMARY_PROMPT_TEMPLATE
     now = datetime.now()
-    if now.day == 1 and now.hour == 0:  # Only run at midnight on the 1st
-        db = SessionLocal()
-        # Compose a monthly summary prompt (customize as needed)
-        prompt = (
-            "It's the start of a new month! Write a professional, engaging summary post for our project's progress and plans for this month, suitable for both Twitter and LinkedIn."
-        )
-        summary = query_all_models(prompt)
-        # Store as a session summary post
-        post = SessionSummaryPost(summary=str(summary), status="approved", platform="both")
-        db.add(post)
-        db.commit()
-        db.refresh(post)
-        # Post to both platforms
-        post_to_x(str(summary))
-        post_to_linkedin(str(summary))
-        db.close()
+    # --- FIX: Always run for testing/demo, or adjust condition for your needs ---
+    # For production, keep: if now.day == 1 and now.hour == 0:
+    # For demo/testing, run every startup:
+    # Remove the if-condition below to always create a SessionSummaryPost on startup
+    # if now.day == 1 and now.hour == 0:
+    db = SessionLocal()
+    prompt = (
+        "It's the start of a new month! Write a professional, engaging summary post for our project's progress and plans for this month, suitable for both Twitter and LinkedIn."
+    )
+    summary = query_all_models(prompt)
+    post = SessionSummaryPost(summary=str(summary), status="approved", platform="both")
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    # Post to both platforms (optional, comment out if not needed)
+    # post_to_x(str(summary))
+    # post_to_linkedin(str(summary))
+    db.close()

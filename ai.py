@@ -11,12 +11,9 @@ load_dotenv()
 # Load API keys from environment variables (SECURITY FIX)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-HF_API_KEY = os.getenv("HF_API_KEY")  # <-- Add this line
-
-# Set verbose logging for transformers
-os.environ["TRANSFORMERS_VERBOSITY"] = "info"
-# Optionally set cache dir:
-# os.environ["TRANSFORMERS_CACHE"] = "D:/Code-Base/Auto-Social AI/.hf_cache"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
+if not OPENAI_API_KEY or not GEMINI_API_KEY or not GROQ_API_KEY:
+    raise ValueError("Please set OPENAI_API_KEY, GEMINI_API_KEY, and GROQ_API_KEY in your .env file.")
 
 # Function to call OpenAI (ChatGPT)
 def askopenai(prompt: str) -> str:
@@ -78,28 +75,29 @@ def askgemini(prompt: str) -> str:
     except requests.RequestException as e:
         return f"Error: {str(e)}"
 
-def ask_hf_api(prompt: str, hf_token: str = None) -> str:
+def askgroq(prompt: str) -> str:
     """
-    Generate content using Hugging Face Inference API (Nous Hermes 2 - Mistral 7B - DPO).
+    Generate content using GroqCloud Llama-4 API.
     """
-    if hf_token is None:
-        hf_token = HF_API_KEY
-    if not hf_token:
-        return "Error: Hugging Face API token not set. Please add HF_API_KEY to your .env file."
-    API_URL = "https://api-inference.huggingface.co/models/NousResearch/Nous-Hermes-2-Mistral-7B-DPO"  # <-- corrected model name (case-sensitive)
-    headers = {"Authorization": f"Bearer {hf_token}"}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}"
+    }
     data = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 150,
-            "temperature": 0.9,
-            "do_sample": True,
-        }
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{
+            "role": "user",
+            "content": prompt
+        }]
     }
     try:
-        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
+        response = requests.post(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
-        return response.json()[0]["generated_text"]
+        resp_json = response.json()
+        if "choices" in resp_json and resp_json["choices"]:
+            return resp_json["choices"][0]["message"]["content"]
+        return f"Error: Unexpected Groq Llama API response: {resp_json}"
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -109,6 +107,6 @@ def askall_models(prompt: str = None) -> Dict[str, str]:
     models = {
         "ChatGPT": askopenai,
         "Gemini": askgemini,
-        "HuggingFace": ask_hf_api
+        "Llama-4": askgroq
     }
     return {model: func(prompt) for model, func in models.items()}

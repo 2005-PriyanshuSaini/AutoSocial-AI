@@ -150,6 +150,25 @@
             border: 1px solid #e2e8f0;
             border-radius: 0.5rem;
             padding: 1rem;
+            /* Add: prevent horizontal overflow */
+            overflow-x: auto;
+            /* Add: ensure content wraps and doesn't overflow */
+            word-break: break-word;
+        }
+        .result-box pre,
+        .scroll-area pre {
+            /* Add: wrap long lines and prevent overflow */
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow-x: auto;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        .post-card,
+        .custom-post-card {
+            /* Add: prevent overflow in cards */
+            overflow-x: auto;
+            word-break: break-word;
         }
         .section-divider {
             border-top: 2px solid #e2e8f0;
@@ -173,15 +192,12 @@
 
         <!-- Tab Navigation -->
         <div class="bg-white rounded-lg card-shadow mb-6 p-1">
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1">
                 <button class="tab-button active px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('generate')">
                     🤖 Generate
                 </button>
                 <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('review')">
-                    👁️ Review
-                </button>
-                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('post')">
-                    📤 Post
+                    👁️ Review & Post
                 </button>
                 <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('trending')">
                     📈 Trending
@@ -233,21 +249,21 @@
             </div>
         </div>
 
-        <!-- Review Content Tab -->
+        <!-- Review & Post Tab (merged) -->
         <div id="review" class="tab-content">
             <div class="bg-white rounded-lg card-shadow p-6">
                 <div class="mb-4">
                     <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
-                        👁️ Review Content
+                        👁️ Review & Post Content
                     </h2>
-                    <p class="text-slate-600">Approve or reject generated content before publishing</p>
+                    <p class="text-slate-600">Approve, reject, or publish generated content</p>
                 </div>
                 <div class="space-y-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <input id="review-id" class="input-field" type="number" placeholder="Post ID" />
                         <select id="review-status" class="input-field">
-                            <option value="approved">✅ Approved</option>
-                            <option value="rejected">❌ Rejected</option>
+                            <option value="approved">✅ Approve</option>
+                            <option value="rejected">❌ Reject</option>
                         </select>
                     </div>
                     <button class="btn-primary" onclick="reviewContent()">Submit Review</button>
@@ -255,32 +271,26 @@
                         <h4 class="font-medium mb-2">Result:</h4>
                         <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
                     </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Post Content Tab -->
-        <div id="post" class="tab-content">
-            <div class="bg-white rounded-lg card-shadow p-6">
-                <div class="mb-4">
-                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
-                        📤 Post Content
-                    </h2>
-                    <p class="text-slate-600">Publish your content to social media platforms</p>
-                </div>
-                <div class="space-y-4">
-                    <select id="post-platform" class="input-field">
-                        <option value="twitter">🐦 Twitter</option>
-                        <option value="linkedin">💼 LinkedIn</option>
-                        <option value="both">🌐 Both</option>
-                    </select>
-                    <input id="post-id" class="input-field" type="number" placeholder="Enter Post ID to publish" />
-                    <button class="btn-primary" onclick="postContent()">
-                        <span id="platform-text">Post to Twitter</span>
-                    </button>
-                    <div id="post-result" class="result-box" style="display: none;">
-                        <h4 class="font-medium mb-2">Result:</h4>
-                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                    <div class="section-divider"></div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                            📤 Publish Content
+                        </h3>
+                        <div class="space-y-4">
+                            <select id="post-platform" class="input-field">
+                                <option value="twitter">🐦 Twitter</option>
+                                <option value="linkedin">💼 LinkedIn</option>
+                                <option value="both">🌐 Both</option>
+                            </select>
+                            <input id="post-id" class="input-field" type="number" placeholder="Enter Post ID to publish" />
+                            <button class="btn-primary" onclick="postContent()">
+                                <span id="platform-text">Post to Twitter</span>
+                            </button>
+                            <div id="post-result" class="result-box" style="display: none;">
+                                <h4 class="font-medium mb-2">Result:</h4>
+                                <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -316,16 +326,37 @@
                 </div>
                 <div class="space-y-4">
                     <input id="watch-folder-path" class="input-field" placeholder="Enter full path to folder..." />
-                    <input id="watch-duration" class="input-field" type="number" min="1" placeholder="Duration (minutes)" />
+                    <div class="flex gap-2">
+                        <input id="watch-duration" class="input-field" type="number" min="1" placeholder="Duration" style="flex:2" />
+                        <select id="watch-duration-unit" class="input-field" style="flex:1">
+                            <option value="minutes">Minutes</option>
+                            <option value="hours">Hours</option>
+                        </select>
+                    </div>
                     <button class="btn-primary" onclick="startWatchSession()">Start Watch Session</button>
                     <button class="btn-secondary btn-danger" onclick="stopWatchSession()">Stop Session</button>
                     <div id="watch-session-status" class="result-box" style="display: none;">
                         <h4 class="font-medium mb-2">Session Status:</h4>
                         <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
                     </div>
+                    <!-- Enhanced Results Section -->
                     <div id="watch-session-results" class="result-box" style="display: none;">
-                        <h4 class="font-medium mb-2">Session Results (Grouped by File):</h4>
-                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                        <h4 class="font-medium mb-2">Session Results:</h4>
+                        <!-- Remove file summaries UI, only show session summary -->
+                        <div id="watch-session-summary"></div>
+                        <div class="section-divider mt-8">
+                            <h3 class="text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                                ✏️ Write My Own (Custom Content)
+                            </h3>
+                            <div class="space-y-4">
+                                <textarea id="watch-custom-content" class="input-field" placeholder="Write your own content for this session..." rows="4"></textarea>
+                                <button class="btn-primary" onclick="saveWatchCustomContent()">Save and Get Post ID</button>
+                                <div id="watch-custom-content-result" class="result-box" style="display: none;">
+                                    <h4 class="font-medium mb-2">Result:</h4>
+                                    <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -341,9 +372,18 @@
                     <p class="text-slate-600">View all approved and posted content</p>
                 </div>
                 <div class="space-y-4">
-                    <button class="btn-primary" onclick="loadHistoryPosts()">Refresh History</button>
-                    <div id="history-list" class="scroll-area">
-                        <p class="text-slate-500 text-center py-8">No approved or posted content yet.</p>
+                    <!-- Slider Controls -->
+                    <div class="flex items-center gap-2 mb-2">
+                        <button class="btn-secondary" onclick="showHistorySlide(-1)">&#8592; Prev</button>
+                        <div id="history-slider-label" class="font-semibold text-slate-700"></div>
+                        <button class="btn-secondary" onclick="showHistorySlide(1)">Next &#8594;</button>
+                    </div>
+                    <!-- Slides -->
+                    <div id="history-slider">
+                        <div id="history-list" class="scroll-area"></div>
+                        <div id="session-summary-list" class="scroll-area" style="display:none"></div>
+                        <div id="watch-session-log-list" class="scroll-area" style="display:none"></div>
+                        <div id="file-change-log-list" class="scroll-area" style="display:none"></div>
                     </div>
                 </div>
             </div>
@@ -369,11 +409,11 @@
 
             // Auto-load history when switching to the history tab
             if (tabName === 'history') {
-                loadHistoryPosts();
+                loadHistorySlider();
             }
         }
 
-        // Update platform text when selection changes
+        // Update platform text when selection changes (move to always present for merged tab)
         document.getElementById('post-platform').addEventListener('change', function() {
             const platform = this.value;
             let platformText = '';
@@ -400,12 +440,38 @@
                 .trim();
         }
 
+        // Helper function to get status badge (move this above loadHistoryPosts so it's always defined)
+        function getStatusBadge(status, type) {
+            let badgeClass = '';
+            let icon = '';
+            switch (status) {
+                case 'approved':
+                    badgeClass = 'badge badge-success';
+                    icon = '✅';
+                    break;
+                case 'rejected':
+                    badgeClass = 'badge badge-danger';
+                    icon = '❌';
+                    break;
+                default:
+                    badgeClass = type === 'custom' ? 'badge badge-custom' : 'badge badge-secondary';
+                    icon = '⏳';
+                    break;
+            }
+            return `<span class="${badgeClass}">${icon} ${status}</span>`;
+        }
+
         // API Functions
+        // Utility: sleep for ms milliseconds
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
         async function generateContent() {
             const prompt = document.getElementById('gen-prompt').value;
             const platform = document.getElementById('gen-platform').value;
             document.getElementById('gen-result').style.display = 'block';
-            document.getElementById('model-results').innerHTML = '<div class="text-slate-600">Please wait, generating content...</div>';
+            document.getElementById('model-results').innerHTML = '<div class="text-slate-600">Generating results...</div>';
             // Add platform-specific instruction to the prompt
             let platformPrompt = prompt;
             if (platform === "twitter") {
@@ -413,6 +479,8 @@
             } else if (platform === "linkedin") {
                 platformPrompt += "\n\nWrite a detailed, professional LinkedIn post. Avoid markdown, stars, hyphens, and headings.";
             }
+            // Add a short pause before showing results
+            await sleep(5);
             try {
                 const res = await fetch('/generate-content/', {
                     method: 'POST',
@@ -450,30 +518,61 @@
             `;
         }
 
+        // Add watermark to all content before saving or posting
+        function addWatermark(text) {
+            const watermark = "\n\n— written by AutoSocial-AI";
+            // Avoid duplicate watermark if already present
+            if (text.trim().endsWith("— written by AutoSocial-AI")) return text;
+            return text + watermark;
+        }
+
+        // --- Patch saveContent, saveWatchContent, saveWatchCustomContent, and postContent to add watermark ---
+
         async function saveContent(model) {
-            const content = document.getElementById('edit-content').value;
+            let content = document.getElementById('edit-content').value;
+            content = addWatermark(content);
             const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model)}&content=${encodeURIComponent(content)}`, {method: 'POST'});
             const data = await res.json();
             document.getElementById('model-results').innerHTML = `<b>${data.message}</b>`;
         }
 
-        function cancelEditContent() {
-            document.getElementById('gen-result').style.display = 'none';
+        async function saveWatchContent(model, file) {
+            let content = document.getElementById('edit-watch-content').value;
+            content = addWatermark(content);
+            const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model + ' (watch:' + file + ')')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
+            const data = await res.json();
+            document.getElementById('watch-session-files').innerHTML = `<b>${data.message}</b>`;
         }
 
-        async function reviewContent() {
-            const id = parseInt(document.getElementById('review-id').value);
-            const status = document.getElementById('review-status').value;
+        async function saveWatchCustomContent() {
+            let content = document.getElementById('watch-custom-content').value;
+            content = addWatermark(content);
+            const res = await fetch('/submit-custom-content/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content})
+            });
+            const data = await res.json();
+            document.getElementById('watch-custom-content-result').style.display = 'block';
+            document.getElementById('watch-custom-content-result').querySelector('pre').textContent = JSON.stringify(data, null, 2);
+            document.getElementById('watch-custom-content').value = '';
+        }
+
+        async function submitCustomContent() {
+            let content = document.getElementById('custom-content').value;
+            content = addWatermark(content);
             try {
-                const res = await fetch('/review-content/', {
+                const res = await fetch('/submit-custom-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({post_id: id, status})
+                    body: JSON.stringify({content})
                 });
                 const data = await res.json();
-                showResult('review-result', JSON.stringify(data, null, 2));
+                showResult('custom-content-result', JSON.stringify(data, null, 2));
+                document.getElementById('custom-content').value = '';
+                setTimeout(loadGeneratedPosts, 500);
             } catch (error) {
-                showResult('review-result', 'Error reviewing content');
+                showResult('custom-content-result', 'Error submitting custom content');
             }
         }
 
@@ -488,11 +587,18 @@
             if (platform === "both") {
                 platformValue = ["twitter", "linkedin"];
             }
+            // Fetch the post content, add watermark if not present, and send it
             try {
+                // Get the post content from the backend
+                const postsRes = await fetch('/generated-posts/');
+                const posts = await postsRes.json();
+                const post = posts.find(p => p.id === post_id);
+                let content = post ? post.content : "";
+                content = addWatermark(content);
                 const res = await fetch('/post-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({post_id, platform: platformValue, content: ""})
+                    body: JSON.stringify({post_id, platform: platformValue, content})
                 });
                 const data = await res.json();
                 showResult('post-result', JSON.stringify(data, null, 2));
@@ -517,6 +623,7 @@
         async function startWatchSession() {
             const path = document.getElementById('watch-folder-path').value;
             const duration = document.getElementById('watch-duration').value;
+            const duration_unit = document.getElementById('watch-duration-unit').value;
             if (!path || !duration) {
                 showResult('watch-session-status', 'Please provide both folder path and duration.');
                 document.getElementById('watch-session-status').style.display = 'block';
@@ -526,7 +633,7 @@
                 const res = await fetch('/start-watch-session/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path, duration})
+                    body: JSON.stringify({path, duration, duration_unit})
                 });
                 const data = await res.json();
                 showResult('watch-session-status', JSON.stringify(data, null, 2));
@@ -572,104 +679,103 @@
             try {
                 const res = await fetch('/watch-session-results/');
                 const data = await res.json();
-                showResult('watch-session-results', JSON.stringify(data, null, 2));
                 document.getElementById('watch-session-results').style.display = 'block';
-            } catch (error) {
-                showResult('watch-session-results', 'Error fetching session results');
-                document.getElementById('watch-session-results').style.display = 'block';
-            }
-        }
-
-        async function submitCustomContent() {
-            const content = document.getElementById('custom-content').value;
-            try {
-                const res = await fetch('/submit-custom-content/', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({content})
-                });
-                const data = await res.json();
-                showResult('custom-content-result', JSON.stringify(data, null, 2));
-                // Clear the textarea after successful submission
-                document.getElementById('custom-content').value = '';
-                // Refresh the generated posts list to show the new custom content
-                setTimeout(loadGeneratedPosts, 500);
-            } catch (error) {
-                showResult('custom-content-result', 'Error submitting custom content');
-            }
-        }
-
-        async function loadGeneratedPosts() {
-            try {
-                const res = await fetch('/generated-posts/');
-                const posts = await res.json();
-                let html = '';
-                if (posts.length === 0) {
-                    html = '<p class="text-slate-500 text-center py-8">No generated content yet.</p>';
-                } else {
-                    for (const post of posts) {
-                        const statusBadge = getStatusBadge(post.status, post.type);
-                        const cardClass = post.type === 'custom' ? 'post-card custom-post-card' : 'post-card';
-                        const typeLabel = post.type === 'custom' ? '✏️ Custom Content' : '🤖 AI Generated';
-                        // Only show action buttons if not approved
-                        let actionButtons = '';
-                        if (post.status !== 'approved') {
-                            actionButtons = `
-                                <button class="btn-secondary btn-success" onclick="approvePost(${post.id})">
-                                    ✅ Approve
-                                </button>
-                                <button class="btn-secondary btn-danger" onclick="rejectPost(${post.id})">
-                                    ❌ Reject
-                                </button>
-                                <button class="btn-secondary btn-outline" onclick="publishPost(${post.id})">
-                                    📤 Publish
-                                </button>
-                            `;
+                // Only show session summary, not file_summaries
+                let summaryHtml = '';
+                if (data && data.session_summary) {
+                    // Show each model's summary in a scrollable, wrapped box
+                    if (typeof data.session_summary === "object") {
+                        for (const [model, content] of Object.entries(data.session_summary)) {
+                            summaryHtml += `<div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
+                                <b>${model}:</b>
+                                <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(content)}</pre>
+                            </div>`;
                         }
-                        html += `
-                            <div class="${cardClass}">
-                                <div class="flex items-start justify-between mb-3">
-                                    <div>
-                                        <div class="flex items-center gap-2 mb-1">
-                                            <span class="text-sm font-medium text-slate-600">${typeLabel}</span>
-                                        </div>
-                                        <p class="font-medium">ID: ${post.id}</p>
-                                        <p class="text-sm text-slate-600">File: ${post.file}</p>
-                                    </div>
-                                    ${statusBadge}
-                                </div>
-                                <div class="bg-slate-50 p-3 rounded text-sm mb-3">
-                                    <pre class="whitespace-pre-wrap">${post.content}</pre>
-                                </div>
-                                <div class="flex gap-2 flex-wrap">
-                                    ${actionButtons}
-                                </div>
-                            </div>
-                        `;
+                    } else {
+                        summaryHtml = `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(data.session_summary)}</pre>`;
                     }
+                } else {
+                    summaryHtml = `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">No session summary available.</pre>`;
                 }
-                document.getElementById('generated-list').innerHTML = html;
+                document.getElementById('watch-session-summary').innerHTML = summaryHtml;
             } catch (error) {
-                document.getElementById('generated-list').innerHTML = '<p class="text-red-500 text-center py-8">Error loading content</p>';
+                document.getElementById('watch-session-summary').innerHTML = '<div class="text-red-600">Error fetching session results</div>';
             }
         }
 
+        // Slider logic for history tab
+        const historySlides = [
+            {
+                label: "Generated Posts",
+                loader: loadHistoryPosts,
+                divId: "history-list"
+            },
+            {
+                label: "Session Summary Posts",
+                loader: loadSessionSummaryPosts,
+                divId: "session-summary-list"
+            },
+            {
+                label: "Watch Session Logs",
+                loader: loadWatchSessionLogs,
+                divId: "watch-session-log-list"
+            },
+            {
+                label: "File Change Logs",
+                loader: loadFileChangeLogs,
+                divId: "file-change-log-list"
+            }
+        ];
+        let currentHistorySlide = 0;
+
+        function showHistorySlide(direction) {
+            // Hide all slides
+            for (const slide of historySlides) {
+                document.getElementById(slide.divId).style.display = "none";
+            }
+            // Update index
+            currentHistorySlide += direction;
+            if (currentHistorySlide < 0) currentHistorySlide = historySlides.length - 1;
+            if (currentHistorySlide >= historySlides.length) currentHistorySlide = 0;
+            // Show current slide
+            const slide = historySlides[currentHistorySlide];
+            document.getElementById(slide.divId).style.display = "block";
+            document.getElementById("history-slider-label").textContent = slide.label;
+            slide.loader();
+        }
+
+        // On tab show, always reset to first slide
+        function loadHistorySlider() {
+            currentHistorySlide = 0;
+            showHistorySlide(0);
+        }
+
+        // --- Slide 1: Generated Posts ---
         async function loadHistoryPosts() {
+            const div = document.getElementById('history-list');
+            div.innerHTML = '<p class="text-slate-500 text-center py-8">Loading history...</p>';
             try {
-                const res = await fetch('/generated-posts/');
-                const posts = await res.json();
+                const res = await fetch('/generated-posts/?include_all=true');
+                let posts = [];
+                try { posts = await res.json(); } catch (e) { div.innerHTML = '<p class="text-red-500 text-center py-8">No history data (invalid response)</p>'; return; }
+                if (!Array.isArray(posts)) { div.innerHTML = '<p class="text-red-500 text-center py-8">No history data (unexpected format)</p>'; return; }
+                const filtered = posts
+                    .sort((a, b) => b.id - a.id)
+                    .slice(0, 100);
                 let html = '';
-                // Only show approved or posted
-                const filtered = posts.filter(p => p.status === 'approved' || p.status === 'posted');
-                // Sort so newest posts come first
-                filtered.sort((a, b) => b.id - a.id);
                 if (filtered.length === 0) {
-                    html = '<p class="text-slate-500 text-center py-8">No approved or posted content yet.</p>';
+                    html = '<p class="text-slate-500 text-center py-8">No content yet.</p>';
                 } else {
                     for (const post of filtered) {
                         const statusBadge = getStatusBadge(post.status, post.type);
                         const cardClass = post.type === 'custom' ? 'post-card custom-post-card' : 'post-card';
-                        const typeLabel = post.type === 'custom' ? '✏️ Custom Content' : '🤖 AI Generated';
+                        let fileInfo = post.file;
+                        if (fileInfo && fileInfo.includes('[Mistral]')) fileInfo += ' (Watched)';
+                        const typeLabel = post.type === 'custom'
+                            ? '✏️ Custom Content'
+                            : (fileInfo && fileInfo.includes('watch:'))
+                                ? '📁 Watched Content'
+                                : '🤖 AI Generated';
                         html += `
                             <div class="${cardClass}">
                                 <div class="flex items-start justify-between mb-3">
@@ -678,74 +784,164 @@
                                             <span class="text-sm font-medium text-slate-600">${typeLabel}</span>
                                         </div>
                                         <p class="font-medium">ID: ${post.id}</p>
-                                        <p class="text-sm text-slate-600">File: ${post.file}</p>
+                                        <p class="text-sm text-slate-600">File: ${fileInfo}</p>
                                     </div>
                                     ${statusBadge}
                                 </div>
-                                <div class="bg-slate-50 p-3 rounded text-sm mb-3">
-                                    <pre class="whitespace-pre-wrap">${post.content}</pre>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3" style="overflow-x:auto;word-break:break-word;">
+                                    <pre class="whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${post.content}</pre>
                                 </div>
                             </div>
                         `;
                     }
                 }
-                document.getElementById('history-list').innerHTML = html;
+                div.innerHTML = html;
             } catch (error) {
-                document.getElementById('history-list').innerHTML = '<p class="text-red-500 text-center py-8">Error loading history</p>';
+                div.innerHTML = `<p class="text-red-500 text-center py-8">Error loading history: ${error}</p>`;
             }
         }
 
-        function getStatusBadge(status, type) {
-            let badgeClass = '';
-            let icon = '';
-            
-            switch (status) {
-                case 'approved':
-                    badgeClass = 'badge badge-success';
-                    icon = '✅';
-                    break;
-                case 'rejected':
-                    badgeClass = 'badge badge-danger';
-                    icon = '❌';
-                    break;
-                default:
-                    badgeClass = type === 'custom' ? 'badge badge-custom' : 'badge badge-secondary';
-                    icon = '⏳';
-                    break;
+        // --- Slide 2: Session Summary Posts ---
+        async function loadSessionSummaryPosts() {
+            const div = document.getElementById('session-summary-list');
+            div.innerHTML = '<p class="text-slate-500 text-center py-8">Loading session summaries...</p>';
+            try {
+                const res = await fetch('/session-summary-posts/');
+                let posts = [];
+                try { posts = await res.json(); } catch (e) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (invalid response)</p>'; return; }
+                if (!Array.isArray(posts)) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (unexpected format)</p>'; return; }
+                let html = '';
+                if (posts.length === 0) {
+                    html = '<p class="text-slate-500 text-center py-8">No session summaries yet.</p>';
+                } else {
+                    for (const post of posts.slice(0, 100)) {
+                        html += `
+                            <div class="post-card">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <span class="text-sm font-medium text-slate-600">📝 Session Summary</span>
+                                        <p class="font-medium">ID: ${post.id}</p>
+                                        <p class="text-sm text-slate-600">Platform: ${post.platform || '-'}</p>
+                                        <p class="text-sm text-slate-600">Status: ${post.status}</p>
+                                        <p class="text-sm text-slate-600">Created: ${post.created_at}</p>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3" style="overflow-x:auto;word-break:break-word;">
+                                    <pre class="whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${post.summary}</pre>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = `<p class="text-red-500 text-center py-8">Error loading session summaries: ${error}</p>`;
             }
+        }
+
+        // --- Slide 3: Watch Session Logs ---
+        async function loadWatchSessionLogs() {
+            const div = document.getElementById('watch-session-log-list');
+            div.innerHTML = '<p class="text-slate-500 text-center py-8">Loading watch session logs...</p>';
+            try {
+                const res = await fetch('/watch-session-logs/');
+                let logs = [];
+                try { logs = await res.json(); } catch (e) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (invalid response)</p>'; return; }
+                if (!Array.isArray(logs)) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (unexpected format)</p>'; return; }
+                let html = '';
+                if (logs.length === 0) {
+                    html = '<p class="text-slate-500 text-center py-8">No watch session logs yet.</p>';
+                } else {
+                    for (const log of logs.slice(0, 100)) {
+                        html += `
+                            <div class="post-card">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <span class="text-sm font-medium text-slate-600">📁 Watch Session</span>
+                                        <p class="font-medium">ID: ${log.id}</p>
+                                        <p class="text-sm text-slate-600">Path: ${log.path}</p>
+                                        <p class="text-sm text-slate-600">Duration: ${log.duration_minutes} min</p>
+                                        <p class="text-sm text-slate-600">Started: ${log.started_at || '-'}</p>
+                                        <p class="text-sm text-slate-600">Ended: ${log.ended_at || '-'}</p>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3" style="overflow-x:auto;word-break:break-word;">
+                                    <pre class="whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${log.result_summary || ''}</pre>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = `<p class="text-red-500 text-center py-8">Error loading watch session logs: ${error}</p>`;
+            }
+        }
+
+        // --- Slide 4: File Change Logs ---
+        async function loadFileChangeLogs() {
+            const div = document.getElementById('file-change-log-list');
+            div.innerHTML = '<p class="text-slate-500 text-center py-8">Loading file change logs...</p>';
+            try {
+                const res = await fetch('/file-change-logs/');
+                let logs = [];
+                try { logs = await res.json(); } catch (e) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (invalid response)</p>'; return; }
+                if (!Array.isArray(logs)) { div.innerHTML = '<p class="text-red-500 text-center py-8">No data (unexpected format)</p>'; return; }
+                let html = '';
+                if (logs.length === 0) {
+                    html = '<p class="text-slate-500 text-center py-8">No file change logs yet.</p>';
+                } else {
+                    for (const log of logs.slice(0, 100)) {
+                        html += `
+                            <div class="post-card">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <span class="text-sm font-medium text-slate-600">📄 File Change</span>
+                                        <p class="font-medium">ID: ${log.id}</p>
+                                        <p class="text-sm text-slate-600">Session ID: ${log.session_id}</p>
+                                        <p class="text-sm text-slate-600">File: ${log.file_path}</p>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-50 p-3 rounded text-sm mb-3" style="overflow-x:auto;word-break:break-word;">
+                                    <pre class="whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${log.diff_summary || ''}</pre>
+                                    <pre class="whitespace-pre-wrap mt-2 text-xs text-slate-500" style="overflow-x:auto;word-break:break-word;">${log.ai_results || ''}</pre>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                div.innerHTML = html;
+            } catch (error) {
+                div.innerHTML = `<p class="text-red-500 text-center py-8">Error loading file change logs: ${error}</p>`;
+            }
+        }
+
+        // On tab show, always reset to first slide
+        function loadHistorySlider() {
+            currentHistorySlide = 0;
+            showHistorySlide(0);
+        }
+
+        // Patch tab switch to call loadHistorySlider for history tab
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => tab.classList.remove('active'));
             
-            return `<span class="${badgeClass}">${icon} ${status}</span>`;
-        }
+            // Remove active class from all tab buttons
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => button.classList.remove('active'));
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
 
-        async function approvePost(id) {
-            await fetch('/review-content/', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({post_id: id, status: "approved"})
-            });
-            loadGeneratedPosts();
-        }
-
-        async function rejectPost(id) {
-            await fetch('/review-content/', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({post_id: id, status: "rejected"})
-            });
-            loadGeneratedPosts();
-        }
-
-        async function publishPost(id) {
-            const platform = prompt("Enter platform (twitter/linkedin):", "twitter");
-            if (!platform) return;
-            const res = await fetch('/post-content/', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({post_id: id, platform, content: ""})
-            });
-            const data = await res.json();
-            alert(data.message || "Error");
-            loadGeneratedPosts();
+            // Auto-load history when switching to the history tab
+            if (tabName === 'history') {
+                loadHistorySlider();
+            }
         }
     </script>
 </body>
