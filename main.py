@@ -5,7 +5,7 @@ import requests
 import threading
 import difflib
 from pathlib import Path
-from fastapi import FastAPI, Request, BackgroundTasks, Body
+from fastapi import FastAPI, Request, BackgroundTasks, Body, Query
 from pydantic import BaseModel
 from typing import Dict, List, Any
 from ai import askall_models as query_all_models
@@ -61,6 +61,10 @@ class CustomContentRequest(BaseModel):
     file: str = "custom"
     content: str
 
+class EditContentRequest(BaseModel):
+    post_id: int
+    new_content: str
+
 # SQLAlchemy model for generated posts
 class GeneratedPost(Base):
     __tablename__ = "generated_posts"
@@ -88,27 +92,47 @@ generation_cancel_event = threading.Event()
 
 @app.post("/generate-content/")
 def generate_content(request: GenerateRequest) -> Dict[str, Any]:
+    """
+    Generate content using all models and return each response with its model name.
+    """
     global generation_count
     if generation_cancel_event.is_set():
         return {"error": "Generation cancelled."}
     generation_count += 1
     prompt = request.prompt or DEFAULT_PROMPT
     responses = query_all_models(prompt)
-    return {"prompt": prompt, "responses": responses}
+    # Return each model's content with its name
+    return {"prompt": prompt, "model_responses": responses}
 
-@app.get("/generation-stats/")
-def generation_stats():
-    return {"generation_requests": generation_count}
+@app.post("/save-generated-content/")
+def save_generated_content(model: str = Query(...), content: str = Query(...)):
+    """
+    Save selected generated content as a pending post and return its ID.
+    """
+    db = SessionLocal()
+    db_post = GeneratedPost(file=model, content=content, status="pending")
+    db.add(db_post)
+    db.commit()
+    db.refresh(db_post)
+    post_id = db_post.id
+    db.close()
+    return {"message": f"Content saved for approval. Use Post ID {post_id} to approve and post.", "id": post_id}
 
-@app.post("/cancel-generation/")
-def cancel_generation():
-    generation_cancel_event.set()
-    return {"message": "Generation cancelled. Further requests will be blocked until reset."}
-
-@app.post("/reset-generation-cancel/")
-def reset_generation_cancel():
-    generation_cancel_event.clear()
-    return {"message": "Generation cancellation reset. New requests will be processed."}
+@app.post("/edit-generated-content/")
+def edit_generated_content(request: EditContentRequest):
+    """
+    Edit the content of a generated post before approval/posting.
+    """
+    db = SessionLocal()
+    post = db.query(GeneratedPost).filter(GeneratedPost.id == request.post_id).first()
+    if not post:
+        db.close()
+        return {"error": "Post not found."}
+    post.content = request.new_content
+    db.commit()
+    db.refresh(post)
+    db.close()
+    return {"message": f"Post {request.post_id} content updated."}
 
 @app.post("/review-content/")
 def review_content(request: ReviewRequest):
@@ -164,6 +188,9 @@ def post_content(request: PostRequest):
 
 @app.post("/submit-custom-content/")
 def submit_custom_content(request: CustomContentRequest):
+    """
+    Save custom content as a pending post and return its ID.
+    """
     db = SessionLocal()
     db_post = GeneratedPost(file=request.file, content=request.content, status="pending")
     db.add(db_post)
@@ -174,7 +201,7 @@ def submit_custom_content(request: CustomContentRequest):
 
 # --- Watchdog automation logic ---
 
-WATCHED_PATH = r"D:\Code-Base"  # Default path
+WATCHED_PATH = r"D:\Code-Base\DSA\c++"  # Default path
 watcher_observer = None
 watcher_thread = None
 watcher_stop_event = threading.Event()
@@ -374,98 +401,47 @@ def stop_watch_session():
 
 @app.get("/watch-session-status/")
 def watch_session_status():
-    """bal watch_session
+    global watch_session
+    """
     Get the status of the current watch session.
-    """ the status of the current watch session.
+    """
     if not watch_session["active"]:
-        return {_session["active"]:
+        return {
             "active": False,
             "results": watch_session.get("results")
-        }   "results": watch_session.get("results")
+        }
     return {
         "active": True,
         "path": watch_session["path"],
         "end_time": watch_session["end_time"].isoformat(),
         "changed_files": list(watch_session["changed_files"])
-    }   "changed_files": list(watch_session["changed_files"])
-    }
-@app.get("/watch-session-results/")
-def watch_session_results():
-    global watch_session
-    if watch_session["active"]:
-        return {"error": "Session still running."}
-    results = watch_session.get("results")
-    if not results:
-        return {"message": "No results available."}
-    # Only return the session summary and file summaries
-    return {
-        "file_summaries": results.get("file_summaries"),
-        "session_summary": results.get("session_summary")
     }
 
-@app.post("/approve-session-summary/")
-def approve_session_summary(data: Dict[str, str] = Body(...)):
-    """
-    Approve and store the session summary for posting.
-    Expects: {"summary": "...", "platform": "twitter" or "linkedin" (optional)}
-    """
-    summary = data.get("summary")
-    platform = data.get("platform")
-    if not summary:
-        return {"error": "Summary is required."}
+@app.get("/generated-posts/")
+def list_generated_posts():
     db = SessionLocal()
-    post = SessionSummaryPost(summary=summary, status="approved", platform=platform)
-    db.add(post)
-    db.commit()
-    db.refresh(post)
-    db.close()
-    return {"message": "Session summary approved and saved.", "id": post.id}
-
-@app.get("/session-summary-posts/")
-def list_session_summary_posts():
-    """
-    List all session summary posts (approved or posted).
-    """
-    db = SessionLocal()
-    posts = db.query(SessionSummaryPost).all()
+    posts = db.query(GeneratedPost).all()
     result = [
         {
             "id": p.id,
-            "summary": p.summary,
+            "file": p.file,
+            "content": str(p.content),  # Ensure content is always a string
             "status": p.status,
             "platform": p.platform,
-            "created_at": p.created_at
+            "type": "custom" if p.file == "custom" else "ai"
         }
         for p in posts
     ]
     db.close()
     return result
 
-@app.get("/generated-posts/")
-def list_generated_posts():")
-    db = SessionLocal()s():
-    posts = db.query(GeneratedPost).all()
-    result = [.query(GeneratedPost).all()
-        {t = [
-            "id": p.id,
-            "file": p.file,
-            "content": str(p.content),  # Ensure content is always a string
-            "status": p.status,ntent),  # Ensure content is always a string
-            "platform": p.platform,
-            "type": "custom" if p.file == "custom" else "ai"
-        }   "type": "custom" if p.file == "custom" else "ai"
-        for p in posts
-    ]   for p in posts
-    db.close()
-    return result
-    return result
 @app.post("/test-huggingface/")
 def test_huggingface(request: GenerateRequest) -> Dict[str, str]:
-    """t_huggingface(request: GenerateRequest) -> Dict[str, str]:
+    """
     Test Hugging Face API content generation only.
-    """t Hugging Face API content generation only.
+    """
     prompt = request.prompt or DEFAULT_PROMPT
-    result = ask_hf_api(prompt)DEFAULT_PROMPT
+    result = ask_hf_api(prompt)
     return {"prompt": prompt, "huggingface_result": result}
 
 def summarize_file_change(file_path, old_content, new_content):

@@ -17,7 +17,7 @@ if "sslmode" not in DATABASE_URL:
         DATABASE_URL += "?sslmode=require"
 
 # Create database engine
-engine = create_engine(DATABASE_URL, echo=False)  # Set echo=True for debugging
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)  # Set echo=True for debugging
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
