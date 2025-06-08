@@ -541,7 +541,17 @@
             content = addWatermark(content);
             const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model + ' (watch:' + file + ')')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
             const data = await res.json();
-            document.getElementById('watch-session-files').innerHTML = `<b>${data.message}</b>`;
+            document.getElementById('watch-session-summary').innerHTML = `
+                <div class="mb-2 font-semibold text-green-700">${data.message}</div>
+                <div class="mb-2">
+                    <span class="font-medium">Post ID:</span>
+                    <span id="saved-watch-post-id" class="bg-slate-100 px-2 py-1 rounded select-all">${data.id}</span>
+                    <button class="btn-secondary" onclick="copySavedWatchPostId()">Copy</button>
+                </div>
+                <div>
+                    <button class="btn-primary" onclick="fetchWatchSessionResults()">Back to Results</button>
+                </div>
+            `;
         }
 
         async function saveWatchCustomContent() {
@@ -619,6 +629,7 @@
 
         // --- Watch Session Logic ---
         let watchSessionInterval = null;
+        let watchSessionStopped = false; // Track if session was auto-stopped
 
         async function startWatchSession() {
             const path = document.getElementById('watch-folder-path').value;
@@ -639,6 +650,7 @@
                 showResult('watch-session-status', JSON.stringify(data, null, 2));
                 document.getElementById('watch-session-status').style.display = 'block';
                 document.getElementById('watch-session-results').style.display = 'none';
+                watchSessionStopped = false;
                 // Poll session status every 5 seconds
                 if (watchSessionInterval) clearInterval(watchSessionInterval);
                 watchSessionInterval = setInterval(fetchWatchSessionStatus, 5000);
@@ -651,6 +663,7 @@
         async function stopWatchSession() {
             try {
                 await fetch('/stop-watch-session/', {method: 'POST'});
+                watchSessionStopped = true;
                 showResult('watch-session-status', 'Session stopping...');
                 document.getElementById('watch-session-status').style.display = 'block';
                 if (watchSessionInterval) clearInterval(watchSessionInterval);
@@ -668,6 +681,8 @@
                 document.getElementById('watch-session-status').style.display = 'block';
                 if (!data.active) {
                     if (watchSessionInterval) clearInterval(watchSessionInterval);
+                    // Show generating message after session stops
+                    showGeneratingMessage();
                     fetchWatchSessionResults();
                 }
             } catch (error) {
@@ -675,31 +690,101 @@
             }
         }
 
+        // Show "Generating content, please wait..." message after session stops
+        function showGeneratingMessage() {
+            document.getElementById('watch-session-results').style.display = 'block';
+            document.getElementById('watch-session-summary').innerHTML = `
+                <div class="text-blue-600 font-semibold mb-2">Generating content, please wait...</div>
+            `;
+        }
+
+        // --- Enhanced fetchWatchSessionResults to support Use/Edit for watched content before saving ---
         async function fetchWatchSessionResults() {
             try {
                 const res = await fetch('/watch-session-results/');
                 const data = await res.json();
                 document.getElementById('watch-session-results').style.display = 'block';
-                // Only show session summary, not file_summaries
                 let summaryHtml = '';
+                // Show Use/Edit for each watched file/model response (before saving)
+                if (data && data.file_summaries && typeof data.file_summaries === "object") {
+                    for (const [file, modelResults] of Object.entries(data.file_summaries)) {
+                        if (typeof modelResults === "object") {
+                            for (const [model, content] of Object.entries(modelResults)) {
+                                summaryHtml += `
+                                    <div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
+                                        <b>${model} (Watched: ${file}):</b>
+                                        <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(content)}</pre>
+                                        <button class="btn-primary" onclick="editOrSaveWatchContent('${model}', \`${cleanContent(content).replace(/`/g, '\\`')}\`, \`${file.replace(/`/g, '\\`')}\`)">Use/Edit This</button>
+                                    </div>
+                                `;
+                            }
+                        }
+                    }
+                }
+                // Session summary (as before)
                 if (data && data.session_summary) {
-                    // Show each model's summary in a scrollable, wrapped box
                     if (typeof data.session_summary === "object") {
                         for (const [model, content] of Object.entries(data.session_summary)) {
                             summaryHtml += `<div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
-                                <b>${model}:</b>
+                                <b>${model} (Session Summary):</b>
                                 <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(content)}</pre>
                             </div>`;
                         }
                     } else {
-                        summaryHtml = `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(data.session_summary)}</pre>`;
+                        summaryHtml += `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(data.session_summary)}</pre>`;
                     }
-                } else {
+                }
+                if (!summaryHtml) {
                     summaryHtml = `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">No session summary available.</pre>`;
                 }
                 document.getElementById('watch-session-summary').innerHTML = summaryHtml;
             } catch (error) {
                 document.getElementById('watch-session-summary').innerHTML = '<div class="text-red-600">Error fetching session results</div>';
+            }
+        }
+
+        // Use/Edit for watched content
+        function editOrSaveWatchContent(model, content, file) {
+            document.getElementById('watch-session-summary').innerHTML = `
+                <b>Editing content from ${model} (Watched: ${file}):</b>
+                <textarea id="edit-watch-content" style="width:100%;height:120px;">${content}</textarea>
+                <div class="flex gap-2 mt-2">
+                    <button class="btn-primary" onclick="saveWatchContent('${model}', \`${file}\`)">Save and Get Post ID</button>
+                    <button class="btn-secondary" onclick="fetchWatchSessionResults()">Cancel</button>
+                </div>
+            `;
+        }
+
+        async function saveWatchContent(model, file) {
+            let content = document.getElementById('edit-watch-content').value;
+            content = addWatermark(content);
+            const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model + ' (watch:' + file + ')')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
+            const data = await res.json();
+            document.getElementById('watch-session-summary').innerHTML = `
+                <div class="mb-2 font-semibold text-green-700">${data.message}</div>
+                <div class="mb-2">
+                    <span class="font-medium">Post ID:</span>
+                    <span id="saved-watch-post-id" class="bg-slate-100 px-2 py-1 rounded select-all">${data.id}</span>
+                    <button class="btn-secondary" onclick="copySavedWatchPostId()">Copy</button>
+                </div>
+                <div>
+                    <button class="btn-primary" onclick="fetchWatchSessionResults()">Back to Results</button>
+                </div>
+            `;
+        }
+
+        function copySavedWatchPostId() {
+            const idSpan = document.getElementById('saved-watch-post-id');
+            if (idSpan) {
+                const range = document.createRange();
+                range.selectNodeContents(idSpan);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                try {
+                    document.execCommand('copy');
+                } catch (e) {}
+                sel.removeAllRanges();
             }
         }
 
