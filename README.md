@@ -2,7 +2,9 @@
 
 AutoSocial AI is a Python automation project that helps you create social media posts or blog content based on your local development work. It watches a folder (like your codebase), detects updates, and generates content that can be posted to platforms like Twitter (X), LinkedIn, or your personal website.
 
-![AutoSocial AI Demo](https://via.placeholder.com/700x300?text=AutoSocial+AI+Demo+Coming+Soon)
+<!-- Replace the below with your actual demo image -->
+![AutoSocial AI Demo](images/demo.png)
+*Add your main demo image at `images/demo.png`*
 
 ---
 
@@ -31,17 +33,19 @@ This project is currently in development.
 ## ✨ Features
 
 - Monitors a folder for file changes  
-- Generates text content using AI  
+- Generates text content using AI (multiple models: ChatGPT, Gemini, Llama)  
 - Can create short posts (e.g. Twitter, LinkedIn) or long posts (e.g. blogs)  
 - Can post to multiple platforms  
-- Option to post instantly or on a schedule
+- Option to post instantly or on a schedule  
+- Session-based summaries for grouped changes  
+- Custom content submission and approval workflow
 
 ---
 
 ## ⚙️ How It Works
 
 1. You give AutoSocial AI access to your project folder.  
-2. It checks for updates or changes in the codebase.  
+2. It monitors file changes and detects updates.  
 3. Based on the changes, it generates a post like:
 
    > Added login system using FastAPI + JWT. Working well! 🔐  
@@ -49,8 +53,9 @@ This project is currently in development.
 
 4. It then posts this content to Twitter, LinkedIn, or your portfolio.
 
-![Workflow Example](https://via.placeholder.com/600x250?text=Example+Workflow+Image)
-
+<!-- Replace the below with your actual workflow image -->
+![Workflow Example](images/workflow.png)
+*Add your workflow image at `images/workflow.png`*
 
 ---
 
@@ -75,53 +80,63 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
   > Then open your browser and visit:
-  > http://localhost:8000/docs
+  > http://localhost:8000/
 
 ---
 
 ## 🔧 Configuration
 
-Before running the backend, create a `.env` file in the project root (or set environment variables) with your API keys and other settings:
+Before running the backend, create a `.env` file in the project root (or set environment variables) with your API keys and other settings.  
+**Required variables:**
 
 ```env
 OPENAI_API_KEY=
-CLAUDE_API_KEY=
-DEEPSEEK_API_KEY=
 GEMINI_API_KEY=
-
+GROQ_API_KEY=
 DATABASE_URL=
+HF_API_KEY=
+
+# --- Social Media API Tokens ---
+X_BEARER_TOKEN=
+X_CONSUMER_KEY=
+X_CONSUMER_SECRET=
+X_ACCESS_TOKEN=
+X_ACCESS_TOKEN_SECRET=
+
+# --- LinkedIn API Tokens ---
+LINKEDIN_ACCESS_TOKEN=
+LINKEDIN_ORGANIZATION_URN=
+LINKEDIN_AUTHOR_URN=
+LINKEDIN_CLIENT_ID=
+LINKEDIN_CLIENT_SECRET=
+LINKEDIN_REDIRECT_URI=
+
+# --- App Secret ---
+SECRET_KEY=
 ```
 
 ---
 
-## ⚙️ How It Works
+## 🖼️ Adding Images
 
-1. You give AutoSocial AI access to your project folder.  
-2. It monitors file changes and detects updates.  
-3. Based on those changes, it generates social media or blog posts automatically.  
-4. It posts the content to configured platforms or your portfolio.
-
----
-
-## ✨ Features
-
-- Folder monitoring for code changes  
-- AI-generated post and blog content  
-- Multi-platform posting support  
-- Scheduling and instant post options  
+- Place your main demo image at `images/demo.png`.
+- Place your workflow/process image at `images/workflow.png`.
+- You can add more images in the `images/` folder and reference them in the README as needed.
 
 ---
 
-## 🚧 Project Status
+## 🛠️ Usage
 
-- Backend (FastAPI): ✅  
-- Frontend: In progress  
+- Configure your `.env` file with the required API keys.
+- Start the backend server.
+- Use the FastAPI docs at [http://localhost:8000/](http://localhost:8000/) to interact with the API.
+- The backend will monitor your specified folder for changes and generate/post content automatically.
+- Approve, edit, or reject generated posts via the API endpoints.
 
 ---
 
-## 🛣️ Roadmap
+## 🛣️ Roadmap Ahead
 
-- Frontend dashboard for post management  
 - Blog publishing support  
 - More platform integrations  
 - Post templates and customization  

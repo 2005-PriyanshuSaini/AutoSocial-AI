@@ -3,7 +3,7 @@
 
 /env
 /env311
-/test
+/bin
 example_transformers_usage.py
 mistral.py
 
