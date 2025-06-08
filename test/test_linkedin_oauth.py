@@ -4,7 +4,8 @@ import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
-CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID") 
+
+CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID")
 CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET") 
 REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI") 
 
