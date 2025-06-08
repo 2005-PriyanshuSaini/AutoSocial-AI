@@ -4,9 +4,9 @@ import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
-CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID") or "86oeyb1md5tpgj"
-CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET") or "WPL_AP1.MDyFtHKhD51QThtR.3VM6lw=="
-REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI") or "http://localhost:8000/linkedin/callback"
+CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID")
+CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET") 
+REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI") 
 
 SCOPE = "openid profile email w_member_social"
 
