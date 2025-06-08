@@ -2,9 +2,7 @@
 
 AutoSocial AI is a Python automation project that helps you create social media posts or blog content based on your local development work. It watches a folder (like your codebase), detects updates, and generates content that can be posted to platforms like Twitter (X), LinkedIn, or your personal website.
 
-<!-- Replace the below with your actual demo image -->
-![AutoSocial AI Demo](images/demo.png)
-*Add your main demo image at `images/demo.png`*
+![AutoSocial AI Demo](\static\images\Landing page.png)
 
 ---
 
@@ -17,16 +15,13 @@ AutoSocial AI is a Python automation project that helps you create social media 
 [![Linktree](https://img.shields.io/badge/Linktree-43e55b?style=flat&logo=linktree)](https://linktr.ee/Priyanshu_Saini2005)
 
 📧 **Email:** [Priyanshusaini9991@gmail.com](mailto:Priyanshusaini9991@gmail.com)  
-📄 [Resume (PDF)](https://drive.google.com/file/d/1-2z_mVgygun_uHoySuZBhAwvxqfFnBQC/view?usp=sharing)
+📄 [Resume (PDF)](https://docs.google.com/document/d/1_LnjZy7qLLiSqB8eeqibY--Ht0c948B17oVZr9wiS1c/edit?usp=sharing)
 
 ---
 
 ## 🚧 Project Status
 
-This project is currently in development.
-
-- ✅ Backend: FastAPI (working)  
-- 🚧 Frontend: In progress
+This project is currently in completed.
 
 ---
 
@@ -54,8 +49,7 @@ This project is currently in development.
 4. It then posts this content to Twitter, LinkedIn, or your portfolio.
 
 <!-- Replace the below with your actual workflow image -->
-![Workflow Example](images/workflow.png)
-*Add your workflow image at `images/workflow.png`*
+![Workflow Example](static\images\Prompt Gen.png)
 
 ---
 
