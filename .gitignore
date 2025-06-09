@@ -8,6 +8,7 @@ example_transformers_usage.py
 mistral.py
 
 __pycache__
+.pytest_cache
 *.pyc
 *.pyo
 *.pyd
