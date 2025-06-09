@@ -467,6 +467,9 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
+        // Store last generated responses for reuse on cancel
+        let lastGeneratedResponses = null;
+
         async function generateContent() {
             const prompt = document.getElementById('gen-prompt').value;
             const platform = document.getElementById('gen-platform').value;
@@ -479,7 +482,6 @@
             } else if (platform === "linkedin") {
                 platformPrompt += "\n\nWrite a detailed, professional LinkedIn post. Avoid markdown, stars, hyphens, and headings.";
             }
-            // Add a short pause before showing results
             await sleep(5);
             try {
                 const res = await fetch('/generate-content/', {
@@ -489,6 +491,7 @@
                 });
                 const data = await res.json();
                 let responses = data.model_responses || data.responses;
+                lastGeneratedResponses = responses; // Save for cancel
                 if (responses && typeof responses === "object") {
                     let html = '';
                     for (const [model, content] of Object.entries(responses)) {
@@ -518,6 +521,25 @@
             `;
         }
 
+        // Improved cancel: restore previous generated content
+        function cancelEditContent() {
+            if (lastGeneratedResponses && typeof lastGeneratedResponses === "object") {
+                let html = '';
+                for (const [model, content] of Object.entries(lastGeneratedResponses)) {
+                    html += `<div class="mb-4 p-2 border rounded">
+                        <b>${model}:</b>
+                        <pre>${cleanContent(content)}</pre>
+                        <button class="btn-primary" onclick="editOrSaveContent('${model}', \`${cleanContent(content).replace(/`/g, '\\`')}\`)">Use/Edit This</button>
+                    </div>`;
+                }
+                document.getElementById('model-results').innerHTML = html;
+                document.getElementById('gen-result').style.display = 'block';
+            } else {
+                document.getElementById('model-results').innerHTML = '';
+                document.getElementById('gen-result').style.display = 'none';
+            }
+        }
+
         // Add watermark to all content before saving or posting
         function addWatermark(text) {
             const watermark = "\n\n— written by AutoSocial-AI";
@@ -541,17 +563,7 @@
             content = addWatermark(content);
             const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model + ' (watch:' + file + ')')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
             const data = await res.json();
-            document.getElementById('watch-session-summary').innerHTML = `
-                <div class="mb-2 font-semibold text-green-700">${data.message}</div>
-                <div class="mb-2">
-                    <span class="font-medium">Post ID:</span>
-                    <span id="saved-watch-post-id" class="bg-slate-100 px-2 py-1 rounded select-all">${data.id}</span>
-                    <button class="btn-secondary" onclick="copySavedWatchPostId()">Copy</button>
-                </div>
-                <div>
-                    <button class="btn-primary" onclick="fetchWatchSessionResults()">Back to Results</button>
-                </div>
-            `;
+            document.getElementById('watch-session-files').innerHTML = `<b>${data.message}</b>`;
         }
 
         async function saveWatchCustomContent() {
@@ -586,7 +598,36 @@
             }
         }
 
-        async function postContent() {
+        // Add this helper for showing a popup and running a callback after OK
+        function showPopup(message, onOk) {
+            let popup = document.getElementById('autosocial-popup');
+            if (popup) popup.remove();
+            popup = document.createElement('div');
+            popup.id = 'autosocial-popup';
+            popup.style.position = 'fixed';
+            popup.style.top = '0';
+            popup.style.left = '0';
+            popup.style.width = '100vw';
+            popup.style.height = '100vh';
+            popup.style.background = 'rgba(0,0,0,0.4)';
+            popup.style.display = 'flex';
+            popup.style.alignItems = 'center';
+            popup.style.justifyContent = 'center';
+            popup.style.zIndex = '9999';
+            popup.innerHTML = `
+                <div style="background:white;padding:2rem 2.5rem;border-radius:1rem;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center;">
+                    <div style="font-size:1.1rem;margin-bottom:1.5rem;">${message}</div>
+                    <button class="btn-primary" id="autosocial-popup-ok-btn">OK</button>
+                </div>
+            `;
+            document.body.appendChild(popup);
+            document.getElementById('autosocial-popup-ok-btn').onclick = function() {
+                popup.remove();
+                if (typeof onOk === 'function') onOk();
+            };
+        }
+
+        async function postContent(skipLengthCheck) {
             const platform = document.getElementById('post-platform').value;
             const post_id = parseInt(document.getElementById('post-id').value);
             if (!post_id) {
@@ -597,14 +638,26 @@
             if (platform === "both") {
                 platformValue = ["twitter", "linkedin"];
             }
-            // Fetch the post content, add watermark if not present, and send it
             try {
-                // Get the post content from the backend
                 const postsRes = await fetch('/generated-posts/');
                 const posts = await postsRes.json();
                 const post = posts.find(p => p.id === post_id);
                 let content = post ? post.content : "";
                 content = addWatermark(content);
+
+                // --- X (Twitter) length check ---
+                if (
+                    !skipLengthCheck &&
+                    (platform === "twitter" || (Array.isArray(platformValue) && platformValue.includes("twitter"))) &&
+                    content.replace(/\s/g, '').length > 280
+                ) {
+                    showPopup(
+                        "Warning: This post is longer than 280 characters. To post on X (Twitter), you need a paid account. Please shorten your post or click OK to continue if you have X Premium.",
+                        function() { postContent(true); }
+                    );
+                    return;
+                }
+
                 const res = await fetch('/post-content/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -629,7 +682,6 @@
 
         // --- Watch Session Logic ---
         let watchSessionInterval = null;
-        let watchSessionStopped = false; // Track if session was auto-stopped
 
         async function startWatchSession() {
             const path = document.getElementById('watch-folder-path').value;
@@ -650,7 +702,6 @@
                 showResult('watch-session-status', JSON.stringify(data, null, 2));
                 document.getElementById('watch-session-status').style.display = 'block';
                 document.getElementById('watch-session-results').style.display = 'none';
-                watchSessionStopped = false;
                 // Poll session status every 5 seconds
                 if (watchSessionInterval) clearInterval(watchSessionInterval);
                 watchSessionInterval = setInterval(fetchWatchSessionStatus, 5000);
@@ -663,7 +714,6 @@
         async function stopWatchSession() {
             try {
                 await fetch('/stop-watch-session/', {method: 'POST'});
-                watchSessionStopped = true;
                 showResult('watch-session-status', 'Session stopping...');
                 document.getElementById('watch-session-status').style.display = 'block';
                 if (watchSessionInterval) clearInterval(watchSessionInterval);
@@ -681,8 +731,6 @@
                 document.getElementById('watch-session-status').style.display = 'block';
                 if (!data.active) {
                     if (watchSessionInterval) clearInterval(watchSessionInterval);
-                    // Show generating message after session stops
-                    showGeneratingMessage();
                     fetchWatchSessionResults();
                 }
             } catch (error) {
@@ -690,51 +738,37 @@
             }
         }
 
-        // Show "Generating content, please wait..." message after session stops
-        function showGeneratingMessage() {
-            document.getElementById('watch-session-results').style.display = 'block';
-            document.getElementById('watch-session-summary').innerHTML = `
-                <div class="text-blue-600 font-semibold mb-2">Generating content, please wait...</div>
-            `;
-        }
-
-        // --- Enhanced fetchWatchSessionResults to support Use/Edit for watched content before saving ---
         async function fetchWatchSessionResults() {
             try {
                 const res = await fetch('/watch-session-results/');
                 const data = await res.json();
                 document.getElementById('watch-session-results').style.display = 'block';
+                // Show session summary with Use/Edit button for each model
                 let summaryHtml = '';
-                // Show Use/Edit for each watched file/model response (before saving)
-                if (data && data.file_summaries && typeof data.file_summaries === "object") {
-                    for (const [file, modelResults] of Object.entries(data.file_summaries)) {
-                        if (typeof modelResults === "object") {
-                            for (const [model, content] of Object.entries(modelResults)) {
-                                summaryHtml += `
-                                    <div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
-                                        <b>${model} (Watched: ${file}):</b>
-                                        <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(content)}</pre>
-                                        <button class="btn-primary" onclick="editOrSaveWatchContent('${model}', \`${cleanContent(content).replace(/`/g, '\\`')}\`, \`${file.replace(/`/g, '\\`')}\`)">Use/Edit This</button>
-                                    </div>
-                                `;
-                            }
-                        }
-                    }
-                }
-                // Session summary (as before)
                 if (data && data.session_summary) {
                     if (typeof data.session_summary === "object") {
                         for (const [model, content] of Object.entries(data.session_summary)) {
                             summaryHtml += `<div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
-                                <b>${model} (Session Summary):</b>
+                                <b>${model}:</b>
                                 <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(content)}</pre>
+                                <div class="flex gap-2 mt-2">
+                                    <button class="btn-primary session-edit-btn" 
+                                        data-model="${jsEscape(model)}" 
+                                        data-content="${jsEscapeForTemplate(content)}">Use/Edit This</button>
+                                </div>
                             </div>`;
                         }
                     } else {
-                        summaryHtml += `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(data.session_summary)}</pre>`;
+                        summaryHtml = `<div class="mb-4 p-2 border rounded overflow-x-auto" style="word-break:break-word;">
+                            <pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">${cleanContent(data.session_summary)}</pre>
+                            <div class="flex gap-2 mt-2">
+                                <button class="btn-primary session-edit-btn" 
+                                    data-model="Session Summary" 
+                                    data-content="${jsEscapeForTemplate(data.session_summary)}">Use/Edit This</button>
+                            </div>
+                        </div>`;
                     }
-                }
-                if (!summaryHtml) {
+                } else {
                     summaryHtml = `<pre class="text-sm text-slate-700 whitespace-pre-wrap" style="overflow-x:auto;word-break:break-word;">No session summary available.</pre>`;
                 }
                 document.getElementById('watch-session-summary').innerHTML = summaryHtml;
@@ -743,22 +777,57 @@
             }
         }
 
-        // Use/Edit for watched content
-        function editOrSaveWatchContent(model, content, file) {
-            document.getElementById('watch-session-summary').innerHTML = `
-                <b>Editing content from ${model} (Watched: ${file}):</b>
-                <textarea id="edit-watch-content" style="width:100%;height:120px;">${content}</textarea>
-                <div class="flex gap-2 mt-2">
-                    <button class="btn-primary" onclick="saveWatchContent('${model}', \`${file}\`)">Save and Get Post ID</button>
-                    <button class="btn-secondary" onclick="fetchWatchSessionResults()">Cancel</button>
-                </div>
-            `;
+        // Utility for safe JS and HTML injection
+        function jsEscape(str) {
+            if (typeof str !== "string") return "";
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+        function jsEscapeForTemplate(str) {
+            if (typeof str !== "string") return "";
+            return str
+                .replace(/\\/g, '\\\\')
+                .replace(/`/g, '\\`')
+                .replace(/\$\{/g, '\\${')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
         }
 
-        async function saveWatchContent(model, file) {
-            let content = document.getElementById('edit-watch-content').value;
+        // Event delegation for Use/Edit buttons in session summary
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.session-edit-btn');
+            if (btn && document.getElementById('watch-session-summary').contains(btn)) {
+                const model = btn.getAttribute('data-model');
+                let content = btn.getAttribute('data-content');
+                content = content
+                    .replace(/&amp;/g, '&')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>');
+                // Show edit UI for this model/content
+                document.getElementById('watch-session-summary').innerHTML = `
+                    <b>Editing session summary from ${model}:</b>
+                    <textarea id="edit-session-summary-content" style="width:100%;height:120px;">${content.replace(/<\/textarea>/gi, '&lt;/textarea&gt;')}</textarea>
+                    <div class="flex gap-2 mt-2">
+                        <button class="btn-primary" onclick="saveSessionSummaryContent('${jsEscape(model)}')">Save and Get Post ID</button>
+                        <button class="btn-secondary" onclick="fetchWatchSessionResults()">Cancel</button>
+                    </div>
+                `;
+            }
+        });
+
+        async function saveSessionSummaryContent(model) {
+            let content = document.getElementById('edit-session-summary-content').value;
             content = addWatermark(content);
-            const res = await fetch(`/save-generated-content/?model=${encodeURIComponent(model + ' (watch:' + file + ')')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
+            const res = await fetch(`/save-generated-content/?model=${encodeURIComponent('session_summary [' + model + ']')}&content=${encodeURIComponent(content)}`, {method: 'POST'});
             const data = await res.json();
             document.getElementById('watch-session-summary').innerHTML = `
                 <div class="mb-2 font-semibold text-green-700">${data.message}</div>
@@ -772,7 +841,6 @@
                 </div>
             `;
         }
-
         function copySavedWatchPostId() {
             const idSpan = document.getElementById('saved-watch-post-id');
             if (idSpan) {
@@ -1026,6 +1094,27 @@
             // Auto-load history when switching to the history tab
             if (tabName === 'history') {
                 loadHistorySlider();
+            }
+        }
+
+        // Add this function for reviewContent if missing or fix if broken
+        async function reviewContent() {
+            const postId = parseInt(document.getElementById('review-id').value);
+            const status = document.getElementById('review-status').value;
+            if (!postId || !status) {
+                showResult('review-result', 'Please enter a valid Post ID and select a status.');
+                return;
+            }
+            try {
+                const res = await fetch('/review-content/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ post_id: postId, status })
+                });
+                const data = await res.json();
+                showResult('review-result', JSON.stringify(data, null, 2));
+            } catch (error) {
+                showResult('review-result', 'Error submitting review');
             }
         }
     </script>
