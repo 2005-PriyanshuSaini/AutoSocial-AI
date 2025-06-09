@@ -42,10 +42,6 @@ This project is currently in completed.
 1. You give AutoSocial AI access to your project folder.  
 2. It monitors file changes and detects updates.  
 3. Based on the changes, it generates a post like:
-
-   > Added login system using FastAPI + JWT. Working well! 🔐  
-   > #FastAPI #Python #DevLog
-
 4. It then posts this content to Twitter, LinkedIn, or your portfolio.
 
 <!-- Replace the below with your actual workflow image -->
