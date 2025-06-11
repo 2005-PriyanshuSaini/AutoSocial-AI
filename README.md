@@ -1,3 +1,5 @@
+**Hosted**: [AutoSocial AI](https://auto-social-nine.vercel.app/)
+
 # AutoSocial AI
 
 AutoSocial AI is a Python automation project that helps you create social media posts or blog content based on your local development work. It watches a folder (like your codebase), detects updates, and generates content that can be posted to platforms like Twitter (X), LinkedIn, or your personal website.
