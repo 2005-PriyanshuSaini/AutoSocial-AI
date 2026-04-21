@@ -1,3 +1,5 @@
+**Hosted**: [AutoSocial AI](https://auto-social-nine.vercel.app/)
+
 # AutoSocial AI
 
 AutoSocial AI is a Python automation project that helps you create social media posts or blog content based on your local development work. It watches a folder (like your codebase), detects updates, and generates content that can be posted to platforms like Twitter (X), LinkedIn, or your personal website.
@@ -42,10 +44,6 @@ This project is currently in completed.
 1. You give AutoSocial AI access to your project folder.  
 2. It monitors file changes and detects updates.  
 3. Based on the changes, it generates a post like:
-
-   > Added login system using FastAPI + JWT. Working well! 🔐  
-   > #FastAPI #Python #DevLog
-
 4. It then posts this content to Twitter, LinkedIn, or your portfolio.
 
 <!-- Replace the below with your actual workflow image -->
@@ -81,77 +79,6 @@ uvicorn main:app --reload
 
 ---
 
-## 🐳 Docker (Production-ish)
-
-### Start everything (FastAPI + Postgres + Redis)
-
-```bash
-docker compose up --build
-```
-
-Then open `http://localhost:8000/` and check health at `http://localhost:8000/healthz`.
-
-Docker is the easiest way to guarantee the intended runtime (**Python 3.11+**) regardless of what your system Python is.
-
-By default the container runs **Gunicorn + Uvicorn workers**. You can tune:
-
-- **`WEB_CONCURRENCY`**: number of worker processes
-- **`GUNICORN_TIMEOUT`**: request timeout seconds
-- **`GUNICORN_GRACEFUL_TIMEOUT`**: graceful shutdown seconds
-
-### Run forever (auto-restart)
-
-- With Docker: services are configured with `restart: unless-stopped` in `docker-compose.yml`.
-- On Linux without Docker: you can run via `systemd` (example below).
-
-#### Example `systemd` unit (Linux)
-
-Create `~/.config/systemd/user/autosocial.service`:
-
-```ini
-[Unit]
-Description=AutoSocial AI (FastAPI background service)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-WorkingDirectory=%h/path/to/Auto-Social AI
-EnvironmentFile=%h/path/to/Auto-Social AI/.env
-ExecStart=%h/path/to/Auto-Social AI/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=default.target
-```
-
-Then:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now autosocial.service
-journalctl --user -u autosocial.service -f
-```
-
-### Watching your project files
-
-- By default, Compose mounts `./watched` into the container at `/watched`.
-- To watch a real folder, change the `app.volumes` entry in `docker-compose.yml` to point at your host project directory.
-- Set `WATCH_PATH=/watched` (already set in `docker-compose.yml`).
-
-#### Watching “any host path” (Docker)
-
-When running in Docker, paths like `/home/kskroyal/...` exist on your host, not inside the container.  
-If you want to paste **any absolute host path** into the UI and have it work, enable host path mapping:
-
-- In `docker-compose.yml`, add:
-  - volume: `"/:/host:ro"`
-  - env: `HOST_FS_ROOT=/host`
-
-Then you can paste a host path (e.g. `/home/kskroyal/Downloads/Priyanshu`) and the backend will resolve it to `/host/home/kskroyal/Downloads/Priyanshu` automatically.
-
----
-
 ## 🔧 Configuration
 
 Before running the backend, create a `.env` file in the project root (or set environment variables) with your API keys and other settings.  
@@ -182,20 +109,6 @@ LINKEDIN_REDIRECT_URI=
 # --- App Secret ---
 SECRET_KEY=
 ```
-
-Tip: start from `.env.example`.
-
-### API keys via UI (no code changes)
-
-If an environment variable is set, the backend **uses it first**. If it is missing, the backend falls back to keys you saved from the UI.
-
-1. Set `SECRET_KEY` (required to store keys securely)
-2. Start the app
-3. Open `http://localhost:8000/` → **⚙️ Settings**
-4. Paste keys → **Save API Keys**
-5. Use:
-   - **Test Connections**: calls each provider with a lightweight request and shows only status codes (no secrets)
-   - **Clear Saved Keys (DB)**: deletes all stored keys (env vars are unaffected)
 
 ---
 
