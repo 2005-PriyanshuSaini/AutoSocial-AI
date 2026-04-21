@@ -41,20 +41,14 @@ def _xor_decrypt_from_b64(ciphertext_b64: str, secret: str) -> str:
 
 
 def _encryption_secret() -> Optional[str]:
-    # Prefer an explicit secret; fall back to an AI key (not ideal but avoids hard failure).
     settings = get_settings()
-    return (
-        settings.secret_key
-        or settings.openai_api_key
-        or settings.gemini_api_key
-        or settings.groq_api_key
-    )
+    return settings.secret_key
 
 
 def set_credential(name: str, value: str) -> None:
     secret = _encryption_secret()
     if not secret:
-        raise ValueError("No encryption secret available. Set at least one AI key first.")
+        raise ValueError("SECRET_KEY is required to store API keys.")
 
     enc = _xor_encrypt_to_b64(value, secret)
     db = SessionLocal()
@@ -72,17 +66,14 @@ def set_credential(name: str, value: str) -> None:
 def get_credential(name: str) -> Optional[str]:
     secret = _encryption_secret()
     if not secret:
-        return None
+        raise RuntimeError("SECRET_KEY is not configured; cannot decrypt stored API keys.")
 
     db = SessionLocal()
     try:
         row = db.query(ApiCredential).filter(ApiCredential.name == name).first()
         if not row:
             return None
-        try:
-            return _xor_decrypt_from_b64(row.value_enc, secret)
-        except Exception:
-            return None
+        return _xor_decrypt_from_b64(row.value_enc, secret)
     finally:
         db.close()
 

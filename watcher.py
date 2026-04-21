@@ -18,15 +18,22 @@ class ChangeHandler(FileSystemEventHandler):
         try:
             prompt = f"Change detected in {event.src_path}"
             # Generate content
-            gen_resp = requests.post("http://127.0.0.1:8000/generate-content/", json={"prompt": prompt})
-            content = gen_resp.json().get("responses", "")
+            gen_resp = requests.post(
+                "http://127.0.0.1:8000/generate-content/",
+                json={"prompt": prompt},
+                timeout=10,
+            )
+            gen_resp.raise_for_status()
+            content = gen_resp.json().get("model_responses") or gen_resp.json().get("responses", "")
             # Post content (to Twitter as example)
-            post_resp = requests.post("http://127.0.0.1:8000/post-content/", json={
-                "platform": "twitter",
-                "content": str(content)
-            })
+            post_resp = requests.post(
+                "http://127.0.0.1:8000/post-content/",
+                json={"platform": "twitter", "content": str(content)},
+                timeout=10,
+            )
+            post_resp.raise_for_status()
             print("Post response:", post_resp.json())
-        except Exception as e:
+        except (requests.RequestException, ValueError) as e:
             print("Error posting content:", e)
 
 if __name__ == "__main__":

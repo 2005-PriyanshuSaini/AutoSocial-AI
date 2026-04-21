@@ -99,6 +99,14 @@ By default the container runs **Gunicorn + Uvicorn workers**. You can tune:
 - **`GUNICORN_TIMEOUT`**: request timeout seconds
 - **`GUNICORN_GRACEFUL_TIMEOUT`**: graceful shutdown seconds
 
+### Monthly summary task
+
+The monthly summary post generator is **disabled by default**. To enable it, set:
+
+- `RUN_MONTHLY_POSTS=true`
+
+It will only run at **00:00 on the 1st day of the month**, and uses a Postgres advisory lock so only one worker runs it when `WEB_CONCURRENCY>1`.
+
 ### Run forever (auto-restart)
 
 - With Docker: services are configured with `restart: unless-stopped` in `docker-compose.yml`.
@@ -196,6 +204,11 @@ If an environment variable is set, the backend **uses it first**. If it is missi
 5. Use:
    - **Test Connections**: calls each provider with a lightweight request and shows only status codes (no secrets)
    - **Clear Saved Keys (DB)**: deletes all stored keys (env vars are unaffected)
+
+### Security warning
+
+- Do **not** expose this service publicly without a strong `SECRET_KEY`.
+- The settings routes (`/settings/api-keys/*`) require an `X-SECRET-KEY` header that matches `SECRET_KEY`.
 
 ---
 

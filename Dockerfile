@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -17,6 +17,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
 
+# Run as non-root
+RUN addgroup --system app && adduser --system --ingroup app --home /app app \
+  && chown -R app:app /app
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
@@ -25,6 +29,8 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
 ENV WEB_CONCURRENCY=2 \
     GUNICORN_TIMEOUT=60 \
     GUNICORN_GRACEFUL_TIMEOUT=30
+
+USER app
 
 # Production default: gunicorn + uvicorn workers
 CMD ["bash", "-lc", "exec gunicorn -k uvicorn.workers.UvicornWorker -w ${WEB_CONCURRENCY} -b 0.0.0.0:8000 --timeout ${GUNICORN_TIMEOUT} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} main:app"]

@@ -47,8 +47,8 @@ services:
       # Set this to a mounted path if you want file watching inside the container
       WATCH_PATH: /watched
       # Optional: allow pasting host absolute paths into the UI by mounting '/' to '/host'
-      # and enabling the resolver below.
-      HOST_FS_ROOT: /host
+      # and enabling the resolver below (opt-in; do not enable by default).
+      # HOST_FS_ROOT: /host
       # AI + social credentials are read from environment or a compose .env file
       OPENAI_API_KEY: ${OPENAI_API_KEY-}
       GEMINI_API_KEY: ${GEMINI_API_KEY-}
@@ -65,9 +65,9 @@ services:
       - "8000:8000"
     volumes:
       # Mount a host directory here to watch your project files
-      - ./watched:/watched
+      - ./watched:/watched:ro
       # Optional (advanced): make host absolute paths available in-container
-      - "/:/host:ro"
+      # - "/:/host:ro"
 
 volumes:
   postgres_data:
