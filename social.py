@@ -1,6 +1,11 @@
+import logging
 import os
+
 import requests
 from requests_oauthlib import OAuth1
+
+logger = logging.getLogger("autosocial.social")
+from secrets_store import get_credential
 
 # --- X (Twitter) Integration ---
 
@@ -9,7 +14,7 @@ def fetch_x_trending_topics():
     Fetch trending topics from X (Twitter).
     Requires Bearer Token and Twitter API v1.1 or v2.
     """
-    BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
+    BEARER_TOKEN = os.getenv("X_BEARER_TOKEN") or get_credential("X_BEARER_TOKEN")
     if not BEARER_TOKEN:
         return ["Set X_BEARER_TOKEN in .env"]
     url = "https://api.twitter.com/1.1/trends/place.json?id=1"  # 1 = Worldwide
@@ -22,16 +27,17 @@ def fetch_x_trending_topics():
             return [trend["name"] for trend in data[0]["trends"][:10]]
         return ["No trending topics found"]
     except Exception as e:
-        return [f"Error fetching X trends: {e}"]
+        logger.warning("Error fetching X trends: %s", e)
+        return ["Error fetching X trends"]
 
 def post_to_x(content):
     """
     Post content to X (Twitter) using OAuth 1.0a (user context).
     """
-    CONSUMER_KEY = os.getenv("X_CONSUMER_KEY")
-    CONSUMER_SECRET = os.getenv("X_CONSUMER_SECRET")
-    ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
-    ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET")
+    CONSUMER_KEY = os.getenv("X_CONSUMER_KEY") or get_credential("X_CONSUMER_KEY")
+    CONSUMER_SECRET = os.getenv("X_CONSUMER_SECRET") or get_credential("X_CONSUMER_SECRET")
+    ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN") or get_credential("X_ACCESS_TOKEN")
+    ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET") or get_credential("X_ACCESS_TOKEN_SECRET")
     if not all([CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET]):
         return {"error": "Set all X OAuth 1.0a credentials in .env"}
     url = "https://api.twitter.com/2/tweets"
@@ -42,7 +48,8 @@ def post_to_x(content):
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"error": f"Error posting to X (OAuth 1.0a): {e}"}
+        logger.warning("Error posting to X: %s", e)
+        return {"error": "Error posting to X"}
 
 # --- LinkedIn Integration ---
 
@@ -60,9 +67,9 @@ def post_to_linkedin(content, urn_type=None):
     Requires LINKEDIN_ACCESS_TOKEN and either LINKEDIN_ORGANIZATION_URN or LINKEDIN_AUTHOR_URN in .env.
     urn_type: "author", "organization", or None (auto)
     """
-    ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN")
-    ORGANIZATION_URN = os.getenv("LINKEDIN_ORGANIZATION_URN")
-    AUTHOR_URN = os.getenv("LINKEDIN_AUTHOR_URN")
+    ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN") or get_credential("LINKEDIN_ACCESS_TOKEN")
+    ORGANIZATION_URN = os.getenv("LINKEDIN_ORGANIZATION_URN") or get_credential("LINKEDIN_ORGANIZATION_URN")
+    AUTHOR_URN = os.getenv("LINKEDIN_AUTHOR_URN") or get_credential("LINKEDIN_AUTHOR_URN")
     # Choose URN based on urn_type
     if urn_type == "author":
         author = AUTHOR_URN
@@ -91,11 +98,11 @@ def post_to_linkedin(content, urn_type=None):
     }
     try:
         resp = requests.post(url, headers=headers, json=data, timeout=10)
-        # Debug output for troubleshooting
-        print("LinkedIn POST request data:", data)
-        print("LinkedIn POST response status:", resp.status_code)
-        print("LinkedIn POST response text:", resp.text)
+        if resp.status_code >= 400:
+            # Do not leak response bodies or tokens into logs.
+            logger.warning("LinkedIn post failed with status=%s", resp.status_code)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        return {"error": f"Error posting to LinkedIn: {e}", "response": getattr(resp, "text", None)}
+        logger.warning("Error posting to LinkedIn: %s", e)
+        return {"error": "Error posting to LinkedIn"}

@@ -3,9 +3,10 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import requests
 import os
+from settings import get_settings
 
 # Set the path to the folder you want to observe
-WATCHED_DIR = r"D:\Code-Base\DSA"  # Use raw string for Windows paths
+WATCHED_DIR = str(get_settings().watch_path) if get_settings().watch_path else ""
 
 class ChangeHandler(FileSystemEventHandler):
     def on_any_event(self, event):
@@ -29,6 +30,10 @@ class ChangeHandler(FileSystemEventHandler):
             print("Error posting content:", e)
 
 if __name__ == "__main__":
+    if not WATCHED_DIR or not os.path.exists(WATCHED_DIR):
+        raise SystemExit(
+            "WATCH_PATH is not set or does not exist. Set WATCH_PATH in your environment or .env."
+        )
     event_handler = ChangeHandler()
     observer = Observer()
     observer.schedule(event_handler, WATCHED_DIR, recursive=True)

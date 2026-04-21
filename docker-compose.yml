@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: autosocial
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d autosocial"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: prod
+      LOG_LEVEL: INFO
+      WEB_CONCURRENCY: 2
+      GUNICORN_TIMEOUT: 60
+      GUNICORN_GRACEFUL_TIMEOUT: 30
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/autosocial
+      DB_SSLMODE: disable
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 10
+      # Set this to a mounted path if you want file watching inside the container
+      WATCH_PATH: /watched
+      # Optional: allow pasting host absolute paths into the UI by mounting '/' to '/host'
+      # and enabling the resolver below.
+      HOST_FS_ROOT: /host
+      # AI + social credentials are read from environment or a compose .env file
+      OPENAI_API_KEY: ${OPENAI_API_KEY-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY-}
+      GROQ_API_KEY: ${GROQ_API_KEY-}
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN-}
+      X_CONSUMER_KEY: ${X_CONSUMER_KEY-}
+      X_CONSUMER_SECRET: ${X_CONSUMER_SECRET-}
+      X_ACCESS_TOKEN: ${X_ACCESS_TOKEN-}
+      X_ACCESS_TOKEN_SECRET: ${X_ACCESS_TOKEN_SECRET-}
+      LINKEDIN_ACCESS_TOKEN: ${LINKEDIN_ACCESS_TOKEN-}
+      LINKEDIN_ORGANIZATION_URN: ${LINKEDIN_ORGANIZATION_URN-}
+      LINKEDIN_AUTHOR_URN: ${LINKEDIN_AUTHOR_URN-}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount a host directory here to watch your project files
+      - ./watched:/watched
+      # Optional (advanced): make host absolute paths available in-container
+      - "/:/host:ro"
+
+volumes:
+  postgres_data:
+  redis_data:

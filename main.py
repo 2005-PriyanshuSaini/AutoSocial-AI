@@ -7,12 +7,13 @@ import difflib
 from pathlib import Path
 from fastapi import FastAPI, Request, BackgroundTasks, Body, Query
 from pydantic import BaseModel
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from ai import askall_models as query_all_models
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from settings import get_settings
 from db import (
     GeneratedPost,
     SessionSummaryPost,
@@ -38,6 +39,7 @@ from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post
 from datetime import datetime, timedelta
 from prompt_templates import DEFAULT_PROMPT
 from fastapi_utils.tasks import repeat_every
+from secrets_store import set_credential, credential_status, delete_credentials, get_credential
 
 # Store session state for watch session (move this to the top)
 watch_session = {
@@ -52,8 +54,44 @@ watch_session = {
 
 app = FastAPI()
 
+# Basic logging config (safe defaults for containers + local)
+import logging
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+
+def _resolve_watch_path(user_path: str) -> Optional[str]:
+    """
+    Resolve a user-provided path for watching.
+
+    - First try the path as provided (works when running on host).
+    - If running in Docker, host paths usually don't exist in-container.
+      Support mapping absolute host paths via HOST_FS_ROOT (default: /host),
+      e.g. mount '/' from host to '/host' in the container.
+    """
+    if not user_path or not isinstance(user_path, str):
+        return None
+
+    p = user_path.strip()
+    if not p:
+        return None
+
+    # Try as-is
+    if os.path.exists(p):
+        return p
+
+    # Try mapping host absolute paths -> container mount prefix
+    host_root = os.getenv("HOST_FS_ROOT", "").strip()  # e.g. /host
+    if host_root and os.path.isabs(p):
+        candidate = os.path.join(host_root, p.lstrip(os.sep))
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
+
 # Mount static directory for frontend
-app.mount("/static", StaticFiles(directory="static"), name="static")
+static_dir = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 @app.get("/")
 def read_index():
@@ -69,7 +107,7 @@ class PostRequest(BaseModel):
     post_id: int
     platform: Any  # Accept str or list
     content: str
-    urn_type: str = None  # "author", "organization", or None
+    urn_type: Optional[str] = None  # "author", "organization", or None
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -82,30 +120,24 @@ class EditContentRequest(BaseModel):
     post_id: int
     new_content: str
 
-# Remove all SQLAlchemy model class definitions from main.py
-# Instead, import them from db.py
+@app.get("/healthz")
+def healthz():
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "app_env": settings.app_env,
+        "db_configured": bool(settings.database_url),
+        "watch_path_configured": bool(settings.watch_path),
+    }
 
-from db import (
-    GeneratedPost,
-    SessionSummaryPost,
-    WatchSessionLog,
-    FileChangeLog,
-    create_all_tables,
-    add_generated_post,
-    update_generated_post_content,
-    set_generated_post_status,
-    list_generated_posts,
-    add_session_summary_post,
-    add_watch_session_log,
-    update_watch_session_log,
-    add_file_change_log,
-    SessionLocal,
-    Base,
-    engine,
-)
 
-# Create tables if not exist
-create_all_tables()
+@app.on_event("startup")
+def _startup_create_tables():
+    # Must not crash the app if DB is temporarily unavailable; it will surface on DB usage.
+    try:
+        create_all_tables()
+    except Exception as e:
+        logging.getLogger("autosocial").warning("Failed to initialize database tables: %s", e)
 
 # Track generation stats and cancellation
 generation_count = 0
@@ -220,9 +252,159 @@ def submit_custom_content(request: CustomContentRequest):
     db.close()
     return {"message": "Custom content submitted for approval.", "id": db_post.id}
 
+
+class ApiKeysUpsertRequest(BaseModel):
+    keys: Dict[str, str]
+
+class ApiKeysClearRequest(BaseModel):
+    names: Optional[List[str]] = None  # if omitted => clear all
+
+class ApiKeysTestRequest(BaseModel):
+    providers: Optional[List[str]] = None  # if omitted => test all
+
+
+@app.get("/settings/api-keys/status")
+def api_keys_status():
+    names = [
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "X_BEARER_TOKEN",
+        "X_CONSUMER_KEY",
+        "X_CONSUMER_SECRET",
+        "X_ACCESS_TOKEN",
+        "X_ACCESS_TOKEN_SECRET",
+        "LINKEDIN_ACCESS_TOKEN",
+        "LINKEDIN_ORGANIZATION_URN",
+        "LINKEDIN_AUTHOR_URN",
+    ]
+    return {"stored": credential_status(names)}
+
+
+@app.post("/settings/api-keys")
+def upsert_api_keys(request: ApiKeysUpsertRequest):
+    # Store only non-empty values
+    updated = []
+    for k, v in (request.keys or {}).items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            continue
+        vv = v.strip()
+        if not vv:
+            continue
+        set_credential(k.strip(), vv)
+        updated.append(k.strip())
+    return {"updated": updated}
+
+
+@app.delete("/settings/api-keys")
+def clear_api_keys(request: ApiKeysClearRequest = Body(default=ApiKeysClearRequest())):
+    deleted = delete_credentials(request.names)
+    return {"deleted": deleted, "names": request.names or "ALL"}
+
+
+def _redact_err(s: str) -> str:
+    if not s:
+        return ""
+    # avoid returning very large responses
+    return (s[:500] + "...") if len(s) > 500 else s
+
+
+@app.post("/settings/api-keys/test")
+def test_api_keys(request: ApiKeysTestRequest):
+    """
+    Test external provider connectivity. Returns redacted status only.
+    """
+    requested = [p.lower() for p in (request.providers or [])]
+    test_all = not requested
+
+    def want(name: str) -> bool:
+        return test_all or (name.lower() in requested)
+
+    results: Dict[str, Any] = {}
+
+    # OpenAI
+    if want("openai"):
+        key = os.getenv("OPENAI_API_KEY") or get_credential("OPENAI_API_KEY")
+        if not key:
+            results["openai"] = {"ok": False, "error": "missing key"}
+        else:
+            try:
+                r = requests.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                    timeout=10,
+                )
+                results["openai"] = {"ok": r.status_code < 400, "status_code": r.status_code}
+            except Exception as e:
+                results["openai"] = {"ok": False, "error": _redact_err(str(e))}
+
+    # Groq
+    if want("groq"):
+        key = os.getenv("GROQ_API_KEY") or get_credential("GROQ_API_KEY")
+        if not key:
+            results["groq"] = {"ok": False, "error": "missing key"}
+        else:
+            try:
+                r = requests.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                    timeout=10,
+                )
+                results["groq"] = {"ok": r.status_code < 400, "status_code": r.status_code}
+            except Exception as e:
+                results["groq"] = {"ok": False, "error": _redact_err(str(e))}
+
+    # Gemini (lightweight generateContent)
+    if want("gemini"):
+        key = os.getenv("GEMINI_API_KEY") or get_credential("GEMINI_API_KEY")
+        if not key:
+            results["gemini"] = {"ok": False, "error": "missing key"}
+        else:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+                payload = {"contents": [{"parts": [{"text": "ping"}]}]}
+                r = requests.post(url, json=payload, timeout=10)
+                results["gemini"] = {"ok": r.status_code < 400, "status_code": r.status_code}
+            except Exception as e:
+                results["gemini"] = {"ok": False, "error": _redact_err(str(e))}
+
+    # X (Twitter) Bearer token test
+    if want("x") or want("twitter"):
+        bearer = os.getenv("X_BEARER_TOKEN") or get_credential("X_BEARER_TOKEN")
+        if not bearer:
+            results["x"] = {"ok": False, "error": "missing X_BEARER_TOKEN"}
+        else:
+            try:
+                r = requests.get(
+                    "https://api.twitter.com/2/users/me",
+                    headers={"Authorization": f"Bearer {bearer}"},
+                    timeout=10,
+                )
+                results["x"] = {"ok": r.status_code < 400, "status_code": r.status_code}
+            except Exception as e:
+                results["x"] = {"ok": False, "error": _redact_err(str(e))}
+
+    # LinkedIn token test
+    if want("linkedin"):
+        token = os.getenv("LINKEDIN_ACCESS_TOKEN") or get_credential("LINKEDIN_ACCESS_TOKEN")
+        if not token:
+            results["linkedin"] = {"ok": False, "error": "missing LINKEDIN_ACCESS_TOKEN"}
+        else:
+            try:
+                r = requests.get(
+                    "https://api.linkedin.com/v2/userinfo",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10,
+                )
+                results["linkedin"] = {"ok": r.status_code < 400, "status_code": r.status_code}
+            except Exception as e:
+                results["linkedin"] = {"ok": False, "error": _redact_err(str(e))}
+
+    return {"results": results}
+
 # --- Watchdog automation logic ---
 
-WATCHED_PATH = r"D:\Code-Base\DSA\c++"  # Default path
+WATCHED_PATH = str(get_settings().watch_path) if get_settings().watch_path else ""
 watcher_observer = None
 watcher_thread = None
 watcher_stop_event = threading.Event()
@@ -246,10 +428,13 @@ def load_gitignore_patterns(gitignore_path):
                 patterns.append(line)
     return patterns
 
-def is_ignored(path, patterns):
+def is_ignored(watched_root: str, path: str, patterns):
     from fnmatch import fnmatch
     # Ensure path is relative to the watched directory and uses forward slashes
-    rel_path = Path(path).resolve().relative_to(Path(WATCHED_PATH).resolve())
+    try:
+        rel_path = Path(path).resolve().relative_to(Path(watched_root).resolve())
+    except Exception:
+        return False
     rel_path_str = str(rel_path).replace("\\", "/")
     for pattern in patterns:
         # Normalize pattern to use forward slashes
@@ -265,6 +450,7 @@ def is_ignored(path, patterns):
 
 def start_watcher(path, stop_event):
     global watcher_observer
+    watched_root = path if os.path.isdir(path) else os.path.dirname(path)
     GITIGNORE_PATH = os.path.join(path, ".gitignore") if os.path.isdir(path) else os.path.join(os.path.dirname(path), ".gitignore")
     GITIGNORE_PATTERNS = load_gitignore_patterns(GITIGNORE_PATH)
 
@@ -272,7 +458,7 @@ def start_watcher(path, stop_event):
         def on_any_event(self, event):
             if event.is_directory:
                 return
-            if is_ignored(event.src_path, GITIGNORE_PATTERNS):
+            if is_ignored(watched_root, event.src_path, GITIGNORE_PATTERNS):
                 return
             # --- FIX: Only generate content if not in a watch session ---
             if watch_session.get("active"):
@@ -284,7 +470,8 @@ def start_watcher(path, stop_event):
             try:
                 prompt = f"Change detected in {event.src_path}"
                 gen_resp = requests.post("http://127.0.0.1:8000/generate-content/", json={"prompt": prompt})
-                content = gen_resp.json().get("responses", "")
+                resp_json = gen_resp.json()
+                content = resp_json.get("model_responses") or resp_json.get("responses", "")
                 db = SessionLocal()
                 db_post = GeneratedPost(file=event.src_path, content=str(content), status="pending")
                 db.add(db_post)
@@ -330,8 +517,14 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
     duration = data.get("duration")  # numeric value
     duration_unit = data.get("duration_unit", "minutes")  # default to minutes if not provided
 
-    if not path or not os.path.exists(path):
-        return JSONResponse({"error": "Invalid path"}, status_code=400)
+    resolved = _resolve_watch_path(path)
+    if not resolved:
+        hint = (
+            "Invalid path. If running in Docker, mount the host filesystem "
+            "and set HOST_FS_ROOT (e.g. mount '/:/host:ro' and set HOST_FS_ROOT=/host), "
+            "or use a path that exists inside the container (e.g. /watched)."
+        )
+        return JSONResponse({"error": hint}, status_code=400)
     try:
         duration = int(duration)
         if duration <= 0:
@@ -355,13 +548,13 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
         "changed_files": set(),
         "thread": None,
         "stop_event": stop_event,
-        "path": path,
+        "path": resolved,
         "end_time": end_time,
         "results": None
     })
     # At session start, store current content of all files in the watched path
     previous_file_contents = {}
-    for root, dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(resolved):
         for fname in files:
             fpath = os.path.join(root, fname)
             try:
@@ -371,7 +564,7 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                 continue
 
     # --- FIX: create session_log and pass session_log_id into the thread ---
-    session_log = add_watch_session_log(path, duration_minutes)
+    session_log = add_watch_session_log(resolved, duration_minutes)
     session_log_id = session_log.id
 
     def session_watcher(session_log_id=session_log_id):
@@ -383,7 +576,7 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
                 watch_session["changed_files"].add(os.path.abspath(event.src_path))
         observer = Observer()
         handler = SessionHandler()
-        observer.schedule(handler, path, recursive=True)
+        observer.schedule(handler, resolved, recursive=True)
         observer.start()
         try:
             while not stop_event.is_set():

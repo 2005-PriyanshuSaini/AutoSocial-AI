@@ -192,7 +192,7 @@
 
         <!-- Tab Navigation -->
         <div class="bg-white rounded-lg card-shadow mb-6 p-1">
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1">
                 <button class="tab-button active px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('generate')">
                     🤖 Generate
                 </button>
@@ -207,6 +207,9 @@
                 </button>
                 <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('history')">
                     🕓 History
+                </button>
+                <button class="tab-button px-4 py-2 rounded text-sm font-medium transition-all" onclick="showTab('settings')">
+                    ⚙️ Settings
                 </button>
             </div>
         </div>
@@ -384,6 +387,64 @@
                         <div id="session-summary-list" class="scroll-area" style="display:none"></div>
                         <div id="watch-session-log-list" class="scroll-area" style="display:none"></div>
                         <div id="file-change-log-list" class="scroll-area" style="display:none"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings" class="tab-content">
+            <div class="bg-white rounded-lg card-shadow p-6">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-2 flex items-center">
+                        ⚙️ API Keys
+                    </h2>
+                    <p class="text-slate-600">Save keys once (stored in Postgres). Values are never shown after saving.</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-sm font-medium text-slate-700">OpenAI</label>
+                            <input id="key-openai" class="input-field" placeholder="OPENAI_API_KEY" type="password" />
+                            <div id="status-openai" class="text-xs text-slate-500"></div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-700">Gemini</label>
+                            <input id="key-gemini" class="input-field" placeholder="GEMINI_API_KEY" type="password" />
+                            <div id="status-gemini" class="text-xs text-slate-500"></div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-700">Groq</label>
+                            <input id="key-groq" class="input-field" placeholder="GROQ_API_KEY" type="password" />
+                            <div id="status-groq" class="text-xs text-slate-500"></div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-700">X (Twitter)</label>
+                            <input id="key-x-bearer" class="input-field" placeholder="X_BEARER_TOKEN" type="password" />
+                            <input id="key-x-consumer-key" class="input-field" placeholder="X_CONSUMER_KEY" type="password" />
+                            <input id="key-x-consumer-secret" class="input-field" placeholder="X_CONSUMER_SECRET" type="password" />
+                            <input id="key-x-access-token" class="input-field" placeholder="X_ACCESS_TOKEN" type="password" />
+                            <input id="key-x-access-secret" class="input-field" placeholder="X_ACCESS_TOKEN_SECRET" type="password" />
+                            <div id="status-x" class="text-xs text-slate-500"></div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-700">LinkedIn</label>
+                            <input id="key-li-token" class="input-field" placeholder="LINKEDIN_ACCESS_TOKEN" type="password" />
+                            <input id="key-li-author" class="input-field" placeholder="LINKEDIN_AUTHOR_URN" type="text" />
+                            <input id="key-li-org" class="input-field" placeholder="LINKEDIN_ORGANIZATION_URN" type="text" />
+                            <div id="status-li" class="text-xs text-slate-500"></div>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary" onclick="saveApiKeys()">Save API Keys</button>
+                    <button class="btn-secondary" onclick="loadApiKeyStatus()">Refresh Status</button>
+                    <button class="btn-secondary btn-outline" onclick="testApiKeys()">Test Connections</button>
+                    <button class="btn-secondary btn-danger" onclick="clearSavedApiKeys()">Clear Saved Keys (DB)</button>
+
+                    <div id="settings-result" class="result-box" style="display:none;">
+                        <h4 class="font-medium mb-2">Result:</h4>
+                        <pre class="text-sm text-slate-700 whitespace-pre-wrap"></pre>
                     </div>
                 </div>
             </div>
@@ -1094,6 +1155,100 @@
             // Auto-load history when switching to the history tab
             if (tabName === 'history') {
                 loadHistorySlider();
+            }
+            if (tabName === 'settings') {
+                loadApiKeyStatus();
+            }
+        }
+
+        async function loadApiKeyStatus() {
+            try {
+                const res = await fetch('/settings/api-keys/status');
+                const data = await res.json();
+                const stored = (data && data.stored) || {};
+                const yn = (v) => v ? '✅ saved' : '❌ not set';
+                document.getElementById('status-openai').textContent = yn(stored.OPENAI_API_KEY);
+                document.getElementById('status-gemini').textContent = yn(stored.GEMINI_API_KEY);
+                document.getElementById('status-groq').textContent = yn(stored.GROQ_API_KEY);
+                document.getElementById('status-x').textContent = [
+                    `Bearer: ${yn(stored.X_BEARER_TOKEN)}`,
+                    `OAuth: ${yn(stored.X_CONSUMER_KEY && stored.X_CONSUMER_SECRET && stored.X_ACCESS_TOKEN && stored.X_ACCESS_TOKEN_SECRET)}`
+                ].join(' | ');
+                document.getElementById('status-li').textContent = [
+                    `Token: ${yn(stored.LINKEDIN_ACCESS_TOKEN)}`,
+                    `Author URN: ${yn(stored.LINKEDIN_AUTHOR_URN)}`,
+                    `Org URN: ${yn(stored.LINKEDIN_ORGANIZATION_URN)}`
+                ].join(' | ');
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        async function saveApiKeys() {
+            const keys = {
+                "OPENAI_API_KEY": document.getElementById('key-openai').value,
+                "GEMINI_API_KEY": document.getElementById('key-gemini').value,
+                "GROQ_API_KEY": document.getElementById('key-groq').value,
+                "X_BEARER_TOKEN": document.getElementById('key-x-bearer').value,
+                "X_CONSUMER_KEY": document.getElementById('key-x-consumer-key').value,
+                "X_CONSUMER_SECRET": document.getElementById('key-x-consumer-secret').value,
+                "X_ACCESS_TOKEN": document.getElementById('key-x-access-token').value,
+                "X_ACCESS_TOKEN_SECRET": document.getElementById('key-x-access-secret').value,
+                "LINKEDIN_ACCESS_TOKEN": document.getElementById('key-li-token').value,
+                "LINKEDIN_AUTHOR_URN": document.getElementById('key-li-author').value,
+                "LINKEDIN_ORGANIZATION_URN": document.getElementById('key-li-org').value
+            };
+
+            try {
+                const res = await fetch('/settings/api-keys', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ keys })
+                });
+                const data = await res.json();
+                showResult('settings-result', JSON.stringify(data, null, 2));
+
+                for (const id of [
+                    'key-openai','key-gemini','key-groq','key-x-bearer','key-x-consumer-key','key-x-consumer-secret',
+                    'key-x-access-token','key-x-access-secret','key-li-token','key-li-author','key-li-org'
+                ]) {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                }
+
+                setTimeout(loadApiKeyStatus, 300);
+            } catch (e) {
+                showResult('settings-result', 'Error saving keys');
+            }
+        }
+
+        async function testApiKeys() {
+            try {
+                const res = await fetch('/settings/api-keys/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                showResult('settings-result', JSON.stringify(data, null, 2));
+            } catch (e) {
+                showResult('settings-result', 'Error testing connections');
+            }
+        }
+
+        async function clearSavedApiKeys() {
+            if (!confirm('This will delete ALL saved API keys from the database. Continue?')) return;
+            try {
+                const res = await fetch('/settings/api-keys', {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                showResult('settings-result', JSON.stringify(data, null, 2));
+                setTimeout(loadApiKeyStatus, 300);
+            } catch (e) {
+                showResult('settings-result', 'Error clearing saved keys');
             }
         }
 

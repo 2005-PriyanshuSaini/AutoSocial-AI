@@ -1,25 +1,50 @@
-import os
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
 from datetime import datetime
+from settings import get_settings
 
-# Load database URL from environment variable (Neon Postgres)
-DATABASE_URL = os.getenv("DATABASE_URL")
+def _with_sslmode(url: str, sslmode: str | None) -> str:
+    if not sslmode:
+        return url
+    if "sslmode=" in url:
+        return url
+    joiner = "&" if "?" in url else "?"
+    return f"{url}{joiner}sslmode={sslmode}"
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable not set")
 
-# For Neon, use sslmode=require in the URL if not already present
-if "sslmode" not in DATABASE_URL:
-    if "?" in DATABASE_URL:
-        DATABASE_URL += "&sslmode=require"
-    else:
-        DATABASE_URL += "?sslmode=require"
+def _default_sqlite_url() -> str:
+    # Safe fallback for local/dev/test when DATABASE_URL isn't set.
+    return "sqlite:///./autosocial.db"
+
+
+settings = get_settings()
+DATABASE_URL = settings.database_url or _default_sqlite_url()
+DATABASE_URL = _with_sslmode(DATABASE_URL, settings.db_sslmode)
+
+# Engine options
+connect_args = {}
+engine_kwargs = {}
+if DATABASE_URL.startswith("sqlite"):
+    # Allow multi-threaded use in dev.
+    connect_args = {"check_same_thread": False}
+else:
+    # Sensible defaults for Postgres in containers.
+    engine_kwargs = {
+        "pool_size": settings.db_pool_size,
+        "max_overflow": settings.db_max_overflow,
+    }
 
 # Create database engine
-engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)  # Set echo=True for debugging
+engine = create_engine(
+    DATABASE_URL,
+    echo=settings.db_echo,
+    pool_pre_ping=True,
+    future=True,
+    connect_args=connect_args,
+    **engine_kwargs,
+)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -60,6 +85,8 @@ class FileChangeLog(Base):
     file_path = Column(String, nullable=False)
     diff_summary = Column(Text, nullable=True)
     ai_results = Column(Text, nullable=True)  # Store as JSON string
+
+# NOTE: API key storage model lives in secrets_store.py (ApiCredential) but shares this Base.
 
 # --- DB Utility Functions ---
 
