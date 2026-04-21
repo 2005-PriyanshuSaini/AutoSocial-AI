@@ -1,0 +1,27 @@
+.git
+.github
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+env311/
+.env
+*.log
+*.db
+*.sqlite3
+node_modules/
+dist/
+build/
+*.swp
+*.swo
+*.DS_Store
+
+# Repo-local artifacts / legacy folders (can be huge on Windows)
+Bin/
+java-version/

@@ -1,5 +1,7 @@
 .env
 \.env
+.env.*
+!.env.example
 
 /env
 /env311
@@ -31,6 +33,7 @@ __pycache__
 *.DS_Store
 *.vscode
 *.idea
+*.iml
 *.swp
 *.swo
 *.bak
@@ -40,3 +43,18 @@ __pycache__
 *.swo
 *.swn
 *.pyclass
+
+# Docker/legacy large folders
+Bin/
+java-version/
+
+# Local app data / mounts
+watched/
+autosocial.db
+
+# Docker / Compose
+docker-compose.override.yml
+*.local.yml
+
+# OS/editor
+.history/

@@ -1,24 +1,20 @@
-import os
-import requests
 import time
 from typing import Dict
-from dotenv import load_dotenv
+
+import requests
+
 from prompt_templates import DEFAULT_PROMPT
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Load API keys from environment variables (SECURITY FIX)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
-if not OPENAI_API_KEY or not GEMINI_API_KEY or not GROQ_API_KEY:
-    raise ValueError("Please set OPENAI_API_KEY, GEMINI_API_KEY, and GROQ_API_KEY in your .env file.")
+from settings import get_settings
+from secrets_store import get_credential
 
 # Function to call OpenAI (ChatGPT)
 def askopenai(prompt: str) -> str:
+    settings = get_settings()
+    api_key = settings.openai_api_key or get_credential("OPENAI_API_KEY")
+    if not api_key:
+        return "Error: OPENAI_API_KEY is not configured."
     url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     data = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}]}
     retries = 5
     for attempt in range(retries):
@@ -42,7 +38,11 @@ def askopenai(prompt: str) -> str:
 
 # Function to call Gemini (Google AI)
 def askgemini(prompt: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    settings = get_settings()
+    api_key = settings.gemini_api_key or get_credential("GEMINI_API_KEY")
+    if not api_key:
+        return "Error: GEMINI_API_KEY is not configured."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
     data = {
         "contents": [
             {
@@ -55,11 +55,12 @@ def askgemini(prompt: str) -> str:
     try:
         response = requests.post(url, json=data, timeout=10)
         if response.status_code == 404:
-            return ("Error: Gemini API returned 404. Check your API key and access at https://makersuite.google.com/app/apikey. "
-                    f"Full response: {response.text}")
+            return (
+                "Error: Gemini API returned 404. Check your API key and model access at "
+                "https://makersuite.google.com/app/apikey."
+            )
         if response.status_code == 401:
-            return ("Error: Gemini API returned 401 Unauthorized. Your API key may be invalid or expired. "
-                    f"Full response: {response.text}")
+            return "Error: Gemini API returned 401 Unauthorized. Your API key may be invalid or expired."
         response.raise_for_status()
         resp_json = response.json()
         # Parse the new response structure
@@ -79,10 +80,14 @@ def askgroq(prompt: str) -> str:
     """
     Generate content using GroqCloud Llama-4 API.
     """
+    settings = get_settings()
+    api_key = settings.groq_api_key or get_credential("GROQ_API_KEY")
+    if not api_key:
+        return "Error: GROQ_API_KEY is not configured."
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {GROQ_API_KEY}"
+        "Authorization": f"Bearer {api_key}"
     }
     data = {
         "model": "llama-3.3-70b-versatile",
