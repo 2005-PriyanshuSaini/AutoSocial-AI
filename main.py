@@ -5,7 +5,7 @@ import requests
 import threading
 import difflib
 from pathlib import Path
-from fastapi import FastAPI, Request, BackgroundTasks, Body, Query
+from fastapi import FastAPI, Request, BackgroundTasks, Body, Query, Header, HTTPException, status, Depends
 from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
 from ai import askall_models as query_all_models
@@ -35,6 +35,7 @@ from db import (
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
+from sqlalchemy import text
 from social import fetch_x_trending_topics, fetch_linkedin_trending_topics, post_to_x, post_to_linkedin
 from datetime import datetime, timedelta
 from prompt_templates import DEFAULT_PROMPT
@@ -58,6 +59,21 @@ app = FastAPI()
 import logging
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+def require_settings_auth(x_secret_key: Optional[str] = Header(default=None, alias="X-SECRET-KEY")) -> None:
+    """
+    Protect settings routes (API keys).
+    Requires X-SECRET-KEY header to match SECRET_KEY.
+    """
+    settings = get_settings()
+    if not settings.secret_key:
+        # Fail closed: don't allow key management without a server-side secret configured.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SECRET_KEY is not configured on the server.",
+        )
+    if not x_secret_key or x_secret_key != settings.secret_key:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def _resolve_watch_path(user_path: str) -> Optional[str]:
@@ -264,7 +280,7 @@ class ApiKeysTestRequest(BaseModel):
 
 
 @app.get("/settings/api-keys/status")
-def api_keys_status():
+def api_keys_status(_: None = Depends(require_settings_auth)):
     names = [
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
@@ -282,7 +298,7 @@ def api_keys_status():
 
 
 @app.post("/settings/api-keys")
-def upsert_api_keys(request: ApiKeysUpsertRequest):
+def upsert_api_keys(request: ApiKeysUpsertRequest, _: None = Depends(require_settings_auth)):
     # Store only non-empty values
     updated = []
     for k, v in (request.keys or {}).items():
@@ -297,7 +313,10 @@ def upsert_api_keys(request: ApiKeysUpsertRequest):
 
 
 @app.delete("/settings/api-keys")
-def clear_api_keys(request: ApiKeysClearRequest = Body(default=ApiKeysClearRequest())):
+def clear_api_keys(
+    request: ApiKeysClearRequest = Body(default=ApiKeysClearRequest()),
+    _: None = Depends(require_settings_auth),
+):
     deleted = delete_credentials(request.names)
     return {"deleted": deleted, "names": request.names or "ALL"}
 
@@ -310,7 +329,7 @@ def _redact_err(s: str) -> str:
 
 
 @app.post("/settings/api-keys/test")
-def test_api_keys(request: ApiKeysTestRequest):
+def test_api_keys(request: ApiKeysTestRequest, _: None = Depends(require_settings_auth)):
     """
     Test external provider connectivity. Returns redacted status only.
     """
@@ -361,9 +380,9 @@ def test_api_keys(request: ApiKeysTestRequest):
             results["gemini"] = {"ok": False, "error": "missing key"}
         else:
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+                url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
                 payload = {"contents": [{"parts": [{"text": "ping"}]}]}
-                r = requests.post(url, json=payload, timeout=10)
+                r = requests.post(url, json=payload, headers={"x-goog-api-key": key}, timeout=10)
                 results["gemini"] = {"ok": r.status_code < 400, "status_code": r.status_code}
             except Exception as e:
                 results["gemini"] = {"ok": False, "error": _redact_err(str(e))}
@@ -554,14 +573,62 @@ async def start_watch_session(request: Request, background_tasks: BackgroundTask
     })
     # At session start, store current content of all files in the watched path
     previous_file_contents = {}
+    watch_log = logging.getLogger("autosocial.watch")
+    gitignore_path = os.path.join(resolved, ".gitignore")
+    gitignore_patterns = load_gitignore_patterns(gitignore_path)
+    max_files = int(os.getenv("WATCH_SCAN_MAX_FILES", "2000"))
+    max_bytes = int(os.getenv("WATCH_SCAN_MAX_BYTES", str(256 * 1024)))  # 256KB/file
+    scanned = 0
+
     for root, dirs, files in os.walk(resolved):
+        # Prune ignored/symlink dirs to avoid deep scans
+        pruned_dirs = []
+        for d in list(dirs):
+            dpath = os.path.join(root, d)
+            if os.path.islink(dpath):
+                watch_log.debug("Skipping symlink dir: %s", dpath)
+                continue
+            if is_ignored(resolved, dpath, gitignore_patterns):
+                watch_log.debug("Skipping ignored dir: %s", dpath)
+                continue
+            pruned_dirs.append(d)
+        dirs[:] = pruned_dirs
+
         for fname in files:
+            if scanned >= max_files:
+                watch_log.debug("Stopping initial scan: max_files=%s reached", max_files)
+                break
+
             fpath = os.path.join(root, fname)
+
+            if is_ignored(resolved, fpath, gitignore_patterns):
+                watch_log.debug("Skipping ignored file: %s", fpath)
+                continue
+            if os.path.islink(fpath):
+                watch_log.debug("Skipping symlink file: %s", fpath)
+                continue
+
             try:
+                st = os.stat(fpath, follow_symlinks=False)
+                # Only regular files
+                import stat as _stat
+
+                if not _stat.S_ISREG(st.st_mode):
+                    watch_log.debug("Skipping non-regular file: %s", fpath)
+                    continue
+                if st.st_size > max_bytes:
+                    watch_log.debug("Skipping large file (%s bytes): %s", st.st_size, fpath)
+                    continue
+
                 with open(fpath, "r", encoding="utf-8") as f:
                     previous_file_contents[fpath] = f.read()
-            except Exception:
+                scanned += 1
+            except (OSError, UnicodeDecodeError) as e:
+                watch_log.debug("Skipping unreadable file %s: %s", fpath, e)
                 continue
+
+        if scanned >= max_files:
+            break
 
     # --- FIX: create session_log and pass session_log_id into the thread ---
     session_log = add_watch_session_log(resolved, duration_minutes)
@@ -782,21 +849,40 @@ def generate_session_summary(changes):
 def monthly_post_task() -> None:
     from prompt_templates import SUMMARY_PROMPT_TEMPLATE
     now = datetime.now()
-    # --- FIX: Always run for testing/demo, or adjust condition for your needs ---
-    # For production, keep: if now.day == 1 and now.hour == 0:
-    # For demo/testing, run every startup:
-    # Remove the if-condition below to always create a SessionSummaryPost on startup
-    # if now.day == 1 and now.hour == 0:
+    # Disabled by default to avoid unexpected posting/duplication.
+    # Opt-in via RUN_MONTHLY_POSTS=true
+    run_flag = os.getenv("RUN_MONTHLY_POSTS", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not run_flag:
+        return
+
+    # Only run at midnight on the 1st
+    if not (now.day == 1 and now.hour == 0):
+        return
+
     db = SessionLocal()
-    prompt = (
-        "It's the start of a new month! Write a professional, engaging summary post for our project's progress and plans for this month, suitable for both Twitter and LinkedIn."
-    )
-    summary = query_all_models(prompt)
-    post = SessionSummaryPost(summary=str(summary), status="approved", platform="both")
-    db.add(post)
-    db.commit()
-    db.refresh(post)
-    # Post to both platforms (optional, comment out if not needed)
-    # post_to_x(str(summary))
-    # post_to_linkedin(str(summary))
-    db.close()
+    lock_taken = True
+    try:
+        # Avoid duplicates when multiple gunicorn workers start.
+        # Use a Postgres advisory lock when available.
+        if engine.dialect.name.startswith("postgres"):
+            lock_taken = bool(db.execute(text("SELECT pg_try_advisory_lock(9042001)")).scalar())
+            if not lock_taken:
+                return
+
+        prompt = (
+            "It's the start of a new month! Write a professional, engaging summary post for our project's "
+            "progress and plans for this month, suitable for both Twitter and LinkedIn."
+        )
+        summary = query_all_models(prompt)
+        post = SessionSummaryPost(summary=str(summary), status="approved", platform="both")
+        db.add(post)
+        db.commit()
+        db.refresh(post)
+    finally:
+        try:
+            if lock_taken and engine.dialect.name.startswith("postgres"):
+                db.execute(text("SELECT pg_advisory_unlock(9042001)"))
+                db.commit()
+        except Exception:
+            pass
+        db.close()

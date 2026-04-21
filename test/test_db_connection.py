@@ -2,12 +2,8 @@ from db import SessionLocal
 from sqlalchemy import text
 
 def test_connection():
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        db.execute(text("SELECT 1")) 
+        db.execute(text("SELECT 1"))
+    finally:
         db.close()
-        print("✅ Database connection successful!")
-    except Exception as e:
-        print(f"❌ Database connection failed: {e}")
-
-test_connection()

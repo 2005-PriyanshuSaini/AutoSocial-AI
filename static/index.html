@@ -403,6 +403,11 @@
                 </div>
 
                 <div class="space-y-4">
+                    <div>
+                        <label class="text-sm font-medium text-slate-700">Admin Secret (X-SECRET-KEY)</label>
+                        <input id="admin-secret" class="input-field" placeholder="SECRET_KEY" type="password" />
+                        <div class="text-xs text-slate-500">Required to manage keys. Not stored after reload unless you choose to keep it.</div>
+                    </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label class="text-sm font-medium text-slate-700">OpenAI</label>
@@ -1163,7 +1168,10 @@
 
         async function loadApiKeyStatus() {
             try {
-                const res = await fetch('/settings/api-keys/status');
+                const adminSecret = (document.getElementById('admin-secret')?.value || '').trim();
+                const res = await fetch('/settings/api-keys/status', {
+                    headers: adminSecret ? {'X-SECRET-KEY': adminSecret} : {}
+                });
                 const data = await res.json();
                 const stored = (data && data.stored) || {};
                 const yn = (v) => v ? '✅ saved' : '❌ not set';
@@ -1185,6 +1193,7 @@
         }
 
         async function saveApiKeys() {
+            const adminSecret = (document.getElementById('admin-secret')?.value || '').trim();
             const keys = {
                 "OPENAI_API_KEY": document.getElementById('key-openai').value,
                 "GEMINI_API_KEY": document.getElementById('key-gemini').value,
@@ -1202,7 +1211,10 @@
             try {
                 const res = await fetch('/settings/api-keys', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: Object.assign(
+                        {'Content-Type': 'application/json'},
+                        adminSecret ? {'X-SECRET-KEY': adminSecret} : {}
+                    ),
                     body: JSON.stringify({ keys })
                 });
                 const data = await res.json();
@@ -1224,9 +1236,13 @@
 
         async function testApiKeys() {
             try {
+                const adminSecret = (document.getElementById('admin-secret')?.value || '').trim();
                 const res = await fetch('/settings/api-keys/test', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: Object.assign(
+                        {'Content-Type': 'application/json'},
+                        adminSecret ? {'X-SECRET-KEY': adminSecret} : {}
+                    ),
                     body: JSON.stringify({})
                 });
                 const data = await res.json();
@@ -1239,9 +1255,13 @@
         async function clearSavedApiKeys() {
             if (!confirm('This will delete ALL saved API keys from the database. Continue?')) return;
             try {
+                const adminSecret = (document.getElementById('admin-secret')?.value || '').trim();
                 const res = await fetch('/settings/api-keys', {
                     method: 'DELETE',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: Object.assign(
+                        {'Content-Type': 'application/json'},
+                        adminSecret ? {'X-SECRET-KEY': adminSecret} : {}
+                    ),
                     body: JSON.stringify({})
                 });
                 const data = await res.json();

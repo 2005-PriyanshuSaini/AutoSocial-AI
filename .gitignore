@@ -58,3 +58,5 @@ docker-compose.override.yml
 
 # OS/editor
 .history/
+
+tests/
